@@ -8,7 +8,7 @@ ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import build_team_numbers, ensure_ssh_keypair, prompt_team_count
+from lib.common import ensure_ssh_keypair, resolve_team_numbers
 from lib.operations import AttackModules, RemoteExecutor, TARGETS
 
 
@@ -25,6 +25,7 @@ def parse_targets(choice: str) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description="User management actions across all teams.")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
+    parser.add_argument("--teams", help="Team range (e.g., '1-12' or '1,3,5').")
     parser.add_argument("--targets", default="all", help="all, linux, windows, or comma-separated hostnames")
     parser.add_argument("--action", required=True, choices=[
         "pkill_users",
@@ -36,9 +37,11 @@ def main() -> int:
     parser.add_argument("--ssh-key", action="store_true", help="Use SSH key authentication for Linux targets")
     args = parser.parse_args()
 
-    team_count = prompt_team_count(args.teams_count)
-    teams = build_team_numbers(team_count)
+    teams = resolve_team_numbers(args.teams, args.teams_count)
     targets = parse_targets(args.targets)
+
+    print(f"[+] Target teams: {teams}")
+    print(f"[+] Action: {args.action} | Targets: {targets}")
 
     ssh_key = None
     if args.ssh_key:

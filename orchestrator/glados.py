@@ -9,7 +9,7 @@ ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import prompt_team_count
+from lib.common import resolve_team_numbers
 
 
 def run_script(script_path: Path, args: list) -> int:
@@ -33,9 +33,15 @@ def prompt_action(label: str, actions: list) -> str:
         return actions[0]
 
 
-def interactive_menu(teams_count: int) -> int:
+def format_teams_arg(teams: list[int]) -> str:
+    return ",".join(str(team) for team in teams)
+
+
+def interactive_menu(teams: list[int]) -> int:
+    teams_arg = format_teams_arg(teams)
     while True:
         print("Aperture Science Red Team Orchestrator")
+        print(f"Active teams: {teams}")
         print("1. Start C2 server")
         print("2. Credential spray")
         print("3. Deploy persistence")
@@ -50,11 +56,11 @@ def interactive_menu(teams_count: int) -> int:
             run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
             continue
         if choice == "2":
-            run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", f"1-{teams_count}"])
+            run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", teams_arg])
             continue
         if choice == "3":
             targets = prompt_targets()
-            run_script(SCRIPT_DIR / "persistence.py", ["--teams-count", str(teams_count), "--targets", targets])
+            run_script(SCRIPT_DIR / "persistence.py", ["--teams", teams_arg, "--targets", targets])
             continue
         if choice == "4":
             targets = prompt_targets()
@@ -70,7 +76,7 @@ def interactive_menu(teams_count: int) -> int:
             )
             run_script(
                 SCRIPT_DIR / "user_management.py",
-                ["--teams-count", str(teams_count), "--targets", targets, "--action", action],
+                ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
         if choice == "5":
@@ -81,7 +87,7 @@ def interactive_menu(teams_count: int) -> int:
             )
             run_script(
                 SCRIPT_DIR / "service_degradation.py",
-                ["--teams-count", str(teams_count), "--targets", targets, "--action", action],
+                ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
         if choice == "6":
@@ -89,7 +95,7 @@ def interactive_menu(teams_count: int) -> int:
             action = prompt_action("Defacement actions:", ["deface_prestashop", "restore_prestashop"])
             run_script(
                 SCRIPT_DIR / "defacement.py",
-                ["--teams-count", str(teams_count), "--targets", targets, "--action", action],
+                ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
         if choice == "7":
@@ -99,7 +105,7 @@ def interactive_menu(teams_count: int) -> int:
             )
             run_script(
                 SCRIPT_DIR / "chaos_mode.py",
-                ["--teams-count", str(teams_count), "--targets", targets, "--action", action],
+                ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
         if choice == "Q":
@@ -111,6 +117,7 @@ def interactive_menu(teams_count: int) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Aperture Science Red Team Orchestrator")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
+    parser.add_argument("--teams", help="Team range (e.g., '1-12' or '1,3,5').")
     parser.add_argument("--action", choices=[
         "c2",
         "credential_spray",
@@ -124,24 +131,24 @@ def main() -> int:
     parser.add_argument("--subaction", help="Action for user/service/defacement/chaos")
     args = parser.parse_args()
 
-    teams_count = prompt_team_count(args.teams_count)
+    teams = resolve_team_numbers(args.teams, args.teams_count)
 
     if not args.action:
-        return interactive_menu(teams_count)
+        return interactive_menu(teams)
 
     if args.action == "c2":
         return run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
     if args.action == "credential_spray":
-        return run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", f"1-{teams_count}"])
+        return run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", format_teams_arg(teams)])
     if args.action == "persistence":
-        return run_script(SCRIPT_DIR / "persistence.py", ["--teams-count", str(teams_count), "--targets", args.targets])
+        return run_script(SCRIPT_DIR / "persistence.py", ["--teams", format_teams_arg(teams), "--targets", args.targets])
     if args.action == "user_management":
         if not args.subaction:
             print("Provide --subaction for user_management.")
             return 1
         return run_script(
             SCRIPT_DIR / "user_management.py",
-            ["--teams-count", str(teams_count), "--targets", args.targets, "--action", args.subaction],
+            ["--teams", format_teams_arg(teams), "--targets", args.targets, "--action", args.subaction],
         )
     if args.action == "service_degradation":
         if not args.subaction:
@@ -149,7 +156,7 @@ def main() -> int:
             return 1
         return run_script(
             SCRIPT_DIR / "service_degradation.py",
-            ["--teams-count", str(teams_count), "--targets", args.targets, "--action", args.subaction],
+            ["--teams", format_teams_arg(teams), "--targets", args.targets, "--action", args.subaction],
         )
     if args.action == "defacement":
         if not args.subaction:
@@ -157,7 +164,7 @@ def main() -> int:
             return 1
         return run_script(
             SCRIPT_DIR / "defacement.py",
-            ["--teams-count", str(teams_count), "--targets", args.targets, "--action", args.subaction],
+            ["--teams", format_teams_arg(teams), "--targets", args.targets, "--action", args.subaction],
         )
     if args.action == "chaos_mode":
         if not args.subaction:
@@ -165,7 +172,7 @@ def main() -> int:
             return 1
         return run_script(
             SCRIPT_DIR / "chaos_mode.py",
-            ["--teams-count", str(teams_count), "--targets", args.targets, "--action", args.subaction],
+            ["--teams", format_teams_arg(teams), "--targets", args.targets, "--action", args.subaction],
         )
     return 0
 

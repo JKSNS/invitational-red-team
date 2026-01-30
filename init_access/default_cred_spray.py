@@ -25,6 +25,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import threading
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from lib.common import resolve_team_numbers
+
 
 # Configuration
 
@@ -345,6 +351,9 @@ class SprayEngine:
         """Spray a single target with credentials"""
         results = []
         wan_ip = target.get_wan_ip(team_num)
+        logger.info(
+            f"[Team {team_num}] Testing {target.hostname} ({wan_ip}) with {creds.username} ({target.os_type})."
+        )
         
         # SSH
         if target.os_type == "linux":
@@ -409,13 +418,16 @@ class SprayEngine:
         logger.info(f"Teams: {self.teams}")
         logger.info(f"Targets: {len(TARGETS)}")
         logger.info(f"Credential sets: {len(creds_list)}")
+        logger.info(f"Parallel mode: {self.parallel} (workers={self.max_workers})")
         logger.info("=" * 70)
         
         tasks = []
         for team_num in self.teams:
+            logger.info(f"Queued targets for Team {team_num}.")
             for target in TARGETS:
                 for creds in creds_list:
                     tasks.append((team_num, target, creds))
+        logger.info(f"Prepared {len(tasks)} total spray tasks.")
         
         if self.parallel:
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -492,7 +504,7 @@ Examples:
     )
     
     parser.add_argument("--teams",
-                        help="Team range (e.g., '1-12' or '1,3,5'). If omitted, prompt for team count.")
+                        help="Team range (e.g., '1-12' or '1,3,5'). If omitted, prompt for team count and list.")
     parser.add_argument("--parallel", action="store_true", default=True,
                         help="Run in parallel (default)")
     parser.add_argument("--sequential", action="store_true",
@@ -524,13 +536,9 @@ Examples:
     
     # Parse teams
     if not args.teams:
-        team_count = int(input("How many teams are playing (1-12)? ").strip())
-        teams = list(range(1, team_count + 1))
-    elif '-' in args.teams:
-        start, end = map(int, args.teams.split('-'))
-        teams = list(range(start, end + 1))
+        teams = resolve_team_numbers()
     else:
-        teams = [int(t) for t in args.teams.split(',')]
+        teams = resolve_team_numbers(args.teams)
     
     # Scan only mode
     if args.scan_only:
@@ -539,6 +547,7 @@ Examples:
             print(f"\n=== Team {team_num} ===")
             for target in TARGETS:
                 wan_ip = target.get_wan_ip(team_num)
+                logger.info(f"Scanning {target.hostname} ({wan_ip}) for open services.")
                 services = scan_services(wan_ip)
                 open_services = [s for s, v in services.items() if v]
                 print(f"  {target.hostname} ({wan_ip}): {', '.join(open_services) or 'no services detected'}")
