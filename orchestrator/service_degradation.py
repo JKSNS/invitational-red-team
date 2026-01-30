@@ -8,7 +8,7 @@ ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import build_team_numbers, prompt_team_count
+from lib.common import resolve_team_numbers
 from lib.operations import AttackModules, RemoteExecutor, TARGETS
 
 
@@ -25,6 +25,7 @@ def parse_targets(choice: str) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Service degradation actions across all teams.")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
+    parser.add_argument("--teams", help="Team range (e.g., '1-12' or '1,3,5').")
     parser.add_argument("--targets", default="all", help="all, linux, windows, or comma-separated hostnames")
     parser.add_argument("--action", required=True, choices=[
         "block_scoring",
@@ -37,9 +38,11 @@ def main() -> int:
     parser.add_argument("--scoring-ip", default="192.168.192.1", help="Scoring engine IP")
     args = parser.parse_args()
 
-    team_count = prompt_team_count(args.teams_count)
-    teams = build_team_numbers(team_count)
+    teams = resolve_team_numbers(args.teams, args.teams_count)
     targets = parse_targets(args.targets)
+
+    print(f"[+] Target teams: {teams}")
+    print(f"[+] Action: {args.action} | Targets: {targets}")
 
     executor = RemoteExecutor(teams)
     attacks = AttackModules(executor)

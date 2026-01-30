@@ -10,6 +10,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 def main() -> int:
     parser = argparse.ArgumentParser(description="Service degradation runner.")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
+    parser.add_argument("--teams", help="Team range (e.g., '1-12' or '1,3,5').")
     parser.add_argument("--action", required=True, choices=[
         "block_scoring",
         "unblock_scoring",
@@ -33,7 +34,9 @@ def main() -> int:
         "--scoring-ip",
         args.scoring_ip,
     ]
-    if args.teams_count:
+    if args.teams:
+        cmd.extend(["--teams", args.teams])
+    elif args.teams_count:
         cmd.extend(["--teams-count", str(args.teams_count)])
     return subprocess.call(cmd)
 
