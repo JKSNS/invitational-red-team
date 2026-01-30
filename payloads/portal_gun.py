@@ -89,7 +89,7 @@ def log_beacon(source_ip: str, data: Dict, beacon_type: str = "generic"):
         try:
             parts = source_ip.split('.')
             third_octet = int(parts[2])
-            if 200 <= third_octet <= 220:
+            if 200 <= third_octet <= 212:
                 team_number = third_octet - 200
         except:
             pass

@@ -38,24 +38,23 @@ class Credentials:
 @dataclass
 class Target:
     hostname: str
-    lan_ip: str
+    host_id: int
     os_type: str
     services: List[str] = field(default_factory=list)
     
     def get_wan_ip(self, team_num: int) -> str:
-        last_octet = self.lan_ip.split('.')[-1]
-        return f"192.168.{200 + team_num}.{last_octet}"
+        return f"192.168.{200 + team_num}.{self.host_id}"
 
 # In-scope targets with services
 TARGETS = [
-    Target("curiosity", "172.16.3.140", "windows", ["smb", "winrm", "rdp"]),
-    Target("morality", "172.16.1.10", "windows", ["smb", "winrm", "rdp", "http"]),
-    Target("anger", "172.16.2.70", "windows", ["smb", "winrm", "rdp", "dns"]),
-    Target("space", "172.16.3.141", "windows", ["smb", "winrm", "rdp"]),
-    Target("scalable", "172.16.2.73", "linux", ["ssh", "http"]),
-    Target("safety", "172.16.1.12", "linux", ["ssh", "http", "ftp"]),
-    Target("storage", "172.16.1.14", "linux", ["ssh", "http", "mysql"]),
-    Target("cake", "172.16.3.143", "linux", ["ssh", "http"]),
+    Target("curiosity", 140, "windows", ["smb", "winrm", "rdp"]),
+    Target("morality", 10, "windows", ["smb", "winrm", "rdp", "http"]),
+    Target("anger", 70, "windows", ["smb", "winrm", "rdp", "dns"]),
+    Target("space", 141, "windows", ["smb", "winrm", "rdp"]),
+    Target("scalable", 73, "linux", ["ssh", "http"]),
+    Target("safety", 12, "linux", ["ssh", "http", "ftp"]),
+    Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
+    Target("cake", 143, "linux", ["ssh", "http"]),
 ]
 
 # Default credentials to try
@@ -492,8 +491,8 @@ Examples:
         '''
     )
     
-    parser.add_argument("--teams", default="1-12",
-                        help="Team range (e.g., '1-12' or '1,3,5')")
+    parser.add_argument("--teams",
+                        help="Team range (e.g., '1-12' or '1,3,5'). If omitted, prompt for team count.")
     parser.add_argument("--parallel", action="store_true", default=True,
                         help="Run in parallel (default)")
     parser.add_argument("--sequential", action="store_true",
@@ -524,7 +523,10 @@ Examples:
     """)
     
     # Parse teams
-    if '-' in args.teams:
+    if not args.teams:
+        team_count = int(input("How many teams are playing (1-12)? ").strip())
+        teams = list(range(1, team_count + 1))
+    elif '-' in args.teams:
         start, end = map(int, args.teams.split('-'))
         teams = list(range(start, end + 1))
     else:
