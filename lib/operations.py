@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from common import TEAM_SUBNET_BASE, get_red_team_ip
+from .common import TEAM_SUBNET_BASE, get_red_team_ip
 
 DEFAULT_USER = "chell"
 DEFAULT_PASS = "Th3cake1salie!"

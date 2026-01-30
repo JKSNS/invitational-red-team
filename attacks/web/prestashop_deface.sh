@@ -54,7 +54,7 @@ fi
 
 if ! ${SUDO} test -f "${IMAGE_PATH}"; then
   err "Seizure image not found at ${IMAGE_PATH}"
-  err "Upload it with: scp images/${IMAGE_NAME} user@host:/tmp/ && ssh user@host \"sudo mv /tmp/${IMAGE_NAME} ${IMAGE_PATH}\""
+  err "Upload it with: scp assets/images/seizure/${IMAGE_NAME} user@host:/tmp/ && ssh user@host \"sudo mv /tmp/${IMAGE_NAME} ${IMAGE_PATH}\""
   exit 4
 fi
 

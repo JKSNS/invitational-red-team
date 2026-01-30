@@ -17,7 +17,7 @@ Welcome to the Aperture Science Red Team Framework. This toolkit is designed for
 
 ## What Changed in This Version
 
-- The main orchestrator is `main/glados.py`
+- The main orchestrator is `orchestrator/glados.py`
 - Operations are invoked manually with no predefined timing
 - IP generation uses the 192.168.200-212 scheme with host IDs
 - C2 and persistence automatically use the local IP from `ip a`
@@ -28,7 +28,7 @@ Welcome to the Aperture Science Red Team Framework. This toolkit is designed for
 ### Start the Orchestrator
 
 ```bash
-python3 main/glados.py
+python3 orchestrator/glados.py
 ```
 
 ### Run Individual Components
@@ -41,43 +41,49 @@ python3 payloads/portal_gun.py --port 8080
 python3 init_access/default_cred_spray.py --teams 1-12
 
 # Deploy persistence
-python3 main/persistence.py --teams-count 12
+python3 orchestrator/persistence.py --teams-count 12
 
 # User management
-python3 main/user_management.py --teams-count 12 --action create_themed_users --targets all
+python3 orchestrator/user_management.py --teams-count 12 --action create_themed_users --targets all
 
 # Service degradation
-python3 main/service_degradation.py --teams-count 12 --action stop_http --targets storage,safety
+python3 orchestrator/service_degradation.py --teams-count 12 --action stop_http --targets storage,safety
 
 # Website defacement
-python3 main/defacement.py --teams-count 12 --action deface_prestashop --targets storage
+python3 orchestrator/defacement.py --teams-count 12 --action deface_prestashop --targets storage
 
 # Chaos mode
-python3 main/chaos_mode.py --teams-count 12 --action deploy_matrix_rain --targets linux
+python3 orchestrator/chaos_mode.py --teams-count 12 --action deploy_matrix_rain --targets linux
 ```
 
 ## Project Structure
 
 ```
 .
+├── attacks/
+│   └── web/
+│       ├── WEB_TESTING_GUIDE.md
+│       └── prestashop_deface.sh
+├── assets/
+│   └── images/
+│       └── seizure/
+│           └── seized_banner.png
 ├── init_access/
 │   └── default_cred_spray.py
-├── main/
+├── lib/
+│   ├── common.py
+│   └── operations.py
+├── orchestrator/
 │   ├── aperture_console.py  # Wrapper for glados
 │   ├── chaos_mode.py
-│   ├── common.py
 │   ├── defacement.py
 │   ├── glados.py            # Main orchestrator
-│   ├── operations.py
 │   ├── persistence.py
 │   ├── service_degradation.py
 │   ├── turret.py            # Wrapper for service_degradation
 │   └── user_management.py
 ├── payloads/
 │   └── portal_gun.py
-├── web/
-│   ├── WEB_TESTING_GUIDE.md
-│   └── prestashop_deface.sh
 └── docs/
     └── (deprecated; content consolidated here)
 ```
@@ -144,7 +150,7 @@ python3 init_access/default_cred_spray.py --teams 1-12 --json results.json
 ### 3) Deploy Persistence
 
 ```bash
-python3 main/persistence.py --teams-count 12 --targets all
+python3 orchestrator/persistence.py --teams-count 12 --targets all
 ```
 
 Persistence uses the local IP from `ip a` for beacon callbacks.
@@ -152,25 +158,25 @@ Persistence uses the local IP from `ip a` for beacon callbacks.
 ### 4) Service Degradation
 
 ```bash
-python3 main/service_degradation.py --teams-count 12 --action stop_http --targets storage,safety
+python3 orchestrator/service_degradation.py --teams-count 12 --action stop_http --targets storage,safety
 ```
 
 ### 5) User Management
 
 ```bash
-python3 main/user_management.py --teams-count 12 --action create_glados_admin --targets all
+python3 orchestrator/user_management.py --teams-count 12 --action create_glados_admin --targets all
 ```
 
 ### 6) Website Defacement
 
 ```bash
-python3 main/defacement.py --teams-count 12 --action deface_prestashop --targets storage
+python3 orchestrator/defacement.py --teams-count 12 --action deface_prestashop --targets storage
 ```
 
 ### 7) Chaos Mode
 
 ```bash
-python3 main/chaos_mode.py --teams-count 12 --action deploy_nyan_cat --targets linux
+python3 orchestrator/chaos_mode.py --teams-count 12 --action deploy_nyan_cat --targets linux
 ```
 
 ## Persistence Locations
