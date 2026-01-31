@@ -394,6 +394,10 @@ add_to_admin_group() {
 add_user "{user}" "Aperture Science test subject"
 set_password "{user}" "{passwd}"
 add_to_admin_group "{user}"
+if command -v sudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
+    echo "{user} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/{user} 2>/dev/null || true
+    chmod 440 /etc/sudoers.d/{user} 2>/dev/null || true
+fi
 echo "Created user: {user}"
 ''')
         linux_cmd = linux_header + '\n'.join(linux_cmds) + '\necho "USERS_CREATED"'
@@ -418,6 +422,7 @@ if command -v userdel >/dev/null 2>&1; then
 elif command -v deluser >/dev/null 2>&1; then
     deluser --remove-home {user} 2>/dev/null || deluser {user} 2>/dev/null || true
 fi
+rm -f /etc/sudoers.d/{user} 2>/dev/null || true
 '''
             )
         linux_cmd = '\n'.join(linux_cmds) + '\necho "USERS_REMOVED"'
