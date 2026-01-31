@@ -3,13 +3,15 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import resolve_team_numbers
+from lib.common import free_port, resolve_team_numbers
+from lib.operations import TARGETS as OPS_TARGETS
 
 
 def run_script(script_path: Path, args: list) -> int:
@@ -17,16 +19,47 @@ def run_script(script_path: Path, args: list) -> int:
     return subprocess.call(cmd)
 
 
-def prompt_targets() -> str:
-    print("Targets: all, linux, windows, or comma-separated hostnames")
-    return input("Targets: ").strip() or "all"
+def prompt_targets() -> Optional[str]:
+    print("Targets: all, linux, windows, comma-separated hostnames, or numbers from the list")
+    print("Targets list:")
+    for idx, target in enumerate(OPS_TARGETS, start=1):
+        print(f"  {idx}. {target.hostname} ({target.os_type})")
+    print(f"  All: all | Linux: linux | Windows: windows | Back: B")
+    while True:
+        choice = input("Targets: ").strip()
+        if not choice:
+            return "all"
+        if choice.upper() == "B":
+            return None
+        lowered = choice.lower()
+        if lowered in {"all", "linux", "windows"}:
+            return lowered
+        tokens = [token.strip() for token in lowered.split(",") if token.strip()]
+        if tokens and all(token.isdigit() for token in tokens):
+            indices = []
+            for token in tokens:
+                index = int(token)
+                if index < 1 or index > len(OPS_TARGETS):
+                    print("Invalid target number. Try again.")
+                    break
+                indices.append(index)
+            else:
+                hostnames = [OPS_TARGETS[i - 1].hostname for i in indices]
+                return ",".join(hostnames)
+            continue
+        if tokens:
+            return ",".join(tokens)
+        print("Invalid input. Try again or use B to go back.")
 
 
-def prompt_action(label: str, actions: list) -> str:
+def prompt_action(label: str, actions: list) -> Optional[str]:
     print(label)
     for idx, action in enumerate(actions, start=1):
         print(f"{idx}. {action}")
+    print("B. Back")
     choice = input("Choice: ").strip()
+    if choice.upper() == "B":
+        return None
     try:
         return actions[int(choice) - 1]
     except (ValueError, IndexError):
@@ -53,6 +86,9 @@ def interactive_menu(teams: list[int]) -> int:
 
         choice = input("Choice: ").strip().upper()
         if choice == "1":
+            freed, message = free_port(8080, auto_install=True)
+            if message:
+                print(f"[+] C2 preflight: {message}")
             run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
             continue
         if choice == "2":
@@ -60,10 +96,14 @@ def interactive_menu(teams: list[int]) -> int:
             continue
         if choice == "3":
             targets = prompt_targets()
+            if targets is None:
+                continue
             run_script(SCRIPT_DIR / "persistence.py", ["--teams", teams_arg, "--targets", targets])
             continue
         if choice == "4":
             targets = prompt_targets()
+            if targets is None:
+                continue
             action = prompt_action(
                 "User management actions:",
                 [
@@ -74,6 +114,8 @@ def interactive_menu(teams: list[int]) -> int:
                     "weaken_root_password",
                 ],
             )
+            if action is None:
+                continue
             run_script(
                 SCRIPT_DIR / "user_management.py",
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
@@ -81,10 +123,14 @@ def interactive_menu(teams: list[int]) -> int:
             continue
         if choice == "5":
             targets = prompt_targets()
+            if targets is None:
+                continue
             action = prompt_action(
                 "Service degradation actions:",
                 ["block_scoring", "unblock_scoring", "stop_http", "start_http", "stop_dns", "start_dns"],
             )
+            if action is None:
+                continue
             run_script(
                 SCRIPT_DIR / "service_degradation.py",
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
@@ -92,7 +138,11 @@ def interactive_menu(teams: list[int]) -> int:
             continue
         if choice == "6":
             targets = prompt_targets()
+            if targets is None:
+                continue
             action = prompt_action("Defacement actions:", ["deface_prestashop", "restore_prestashop"])
+            if action is None:
+                continue
             run_script(
                 SCRIPT_DIR / "defacement.py",
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
@@ -100,9 +150,13 @@ def interactive_menu(teams: list[int]) -> int:
             continue
         if choice == "7":
             targets = prompt_targets()
+            if targets is None:
+                continue
             action = prompt_action(
                 "Chaos actions:", ["deploy_nyan_cat", "deploy_matrix_rain", "deploy_desktop_goose", "remove_chaos"]
             )
+            if action is None:
+                continue
             run_script(
                 SCRIPT_DIR / "chaos_mode.py",
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
@@ -137,6 +191,9 @@ def main() -> int:
         return interactive_menu(teams)
 
     if args.action == "c2":
+        freed, message = free_port(8080, auto_install=True)
+        if message:
+            print(f"[+] C2 preflight: {message}")
         return run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
     if args.action == "credential_spray":
         return run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", format_teams_arg(teams)])

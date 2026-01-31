@@ -4,7 +4,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 TEAM_SUBNET_BASE = 200
 TEAM_SUBNET_MIN = 200
@@ -108,6 +108,115 @@ def get_log_dir(app_name: str = "aperture") -> Path:
 
 def find_missing_binaries(binaries: List[str]) -> List[str]:
     return [binary for binary in binaries if shutil.which(binary) is None]
+
+
+def detect_package_manager() -> Optional[str]:
+    for manager in ("apt-get", "dnf", "yum", "pacman", "brew", "apk", "zypper"):
+        if shutil.which(manager):
+            return manager
+    return None
+
+
+def get_install_hints(binaries: List[str]) -> Dict[str, str]:
+    manager = detect_package_manager()
+    hints: Dict[str, str] = {}
+    package_overrides = {
+        "apt-get": {
+            "mysql": "default-mysql-client",
+            "psmisc": "psmisc",
+        },
+        "dnf": {
+            "mysql": "mysql",
+            "psmisc": "psmisc",
+        },
+        "yum": {
+            "mysql": "mysql",
+            "psmisc": "psmisc",
+        },
+        "pacman": {
+            "mysql": "mysql-clients",
+            "psmisc": "psmisc",
+        },
+        "brew": {
+            "mysql": "mysql-client",
+        },
+        "apk": {
+            "mysql": "mysql-client",
+            "psmisc": "psmisc",
+        },
+        "zypper": {
+            "mysql": "mysql-client",
+            "psmisc": "psmisc",
+        },
+    }
+    packages = []
+    if manager:
+        for binary in binaries:
+            packages.append(package_overrides.get(manager, {}).get(binary, binary))
+        joiner = " ".join(packages)
+        if manager == "apt-get":
+            hints[manager] = f"sudo apt-get update && sudo apt-get install -y {joiner}"
+        elif manager == "dnf":
+            hints[manager] = f"sudo dnf install -y {joiner}"
+        elif manager == "yum":
+            hints[manager] = f"sudo yum install -y {joiner}"
+        elif manager == "pacman":
+            hints[manager] = f"sudo pacman -Sy --noconfirm {joiner}"
+        elif manager == "brew":
+            hints[manager] = f"brew install {joiner}"
+        elif manager == "apk":
+            hints[manager] = f"sudo apk add {joiner}"
+        elif manager == "zypper":
+            hints[manager] = f"sudo zypper install -y {joiner}"
+    return hints
+
+
+def attempt_install(binaries: List[str]) -> List[str]:
+    missing = find_missing_binaries(binaries)
+    if not missing:
+        return []
+    manager = detect_package_manager()
+    if not manager:
+        return missing
+    hints = get_install_hints(missing)
+    cmd = hints.get(manager)
+    if not cmd:
+        return missing
+    use_sudo = "sudo" in cmd and shutil.which("sudo") is None
+    if use_sudo:
+        cmd = cmd.replace("sudo ", "")
+    subprocess.run(cmd, shell=True, check=False)
+    return find_missing_binaries(binaries)
+
+
+def _run_port_kill(command: List[str]) -> Tuple[bool, str]:
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            return True, result.stdout.strip()
+        return False, result.stderr.strip() or result.stdout.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def free_port(port: int, auto_install: bool = False) -> Tuple[bool, str]:
+    if auto_install and shutil.which("lsof") is None:
+        attempt_install(["lsof"])
+    if shutil.which("lsof"):
+        success, output = _run_port_kill(["lsof", "-ti", f":{port}"])
+        if success and output:
+            for pid in output.splitlines():
+                _run_port_kill(["kill", "-9", pid.strip()])
+            return True, f"Killed processes on port {port}: {output}"
+        return True, f"No processes found on port {port}"
+    if auto_install and shutil.which("fuser") is None:
+        attempt_install(["psmisc"])
+    if shutil.which("fuser"):
+        success, output = _run_port_kill(["fuser", "-k", f"{port}/tcp"])
+        if success:
+            return True, f"fuser cleared port {port}"
+        return False, output or f"fuser failed to clear port {port}"
+    return False, "No supported tooling (lsof or fuser) to clear port"
 
 
 def get_red_team_ip() -> str:
