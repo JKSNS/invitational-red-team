@@ -95,6 +95,18 @@ def format_teams_arg(teams: list[int]) -> str:
     return ",".join(str(team) for team in teams)
 
 
+def load_ssh_pubkey() -> Optional[str]:
+    candidates = [
+        Path.home() / ".ssh" / "id_ed25519.pub",
+        Path.home() / ".ssh" / "id_rsa.pub",
+        Path.home() / ".ssh" / "id_ecdsa.pub",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8").strip()
+    return None
+
+
 def _summarize_failures(label: str, results: dict) -> None:
     failures = results.get("failed", [])
     if not failures:
@@ -106,6 +118,23 @@ def _summarize_failures(label: str, results: dict) -> None:
         print(
             f"  - Team {failure.get('team')} | {failure.get('target')} "
             f"({failure.get('ip')}) [{method}]"
+        )
+        if output:
+            for line in output.splitlines():
+                print(f"      {line}")
+
+
+def _summarize_skips(label: str, results: dict) -> None:
+    skipped = results.get("skipped", [])
+    if not skipped:
+        return
+    print(f"[!] {label} skipped ({len(skipped)}):")
+    for skip in skipped:
+        output = (skip.get("output") or "").strip()
+        method = skip.get("method", "unknown")
+        print(
+            f"  - Team {skip.get('team')} | {skip.get('target')} "
+            f"({skip.get('ip')}) [{method}]"
         )
         if output:
             for line in output.splitlines():
@@ -131,6 +160,12 @@ def _retry_failures(
 
 
 def run_init_sequence(teams: list[int]) -> None:
+    pubkey = load_ssh_pubkey()
+    if pubkey:
+        os.environ["APERTURE_SSH_PUBKEY"] = pubkey
+        print("[+] Init: loaded local SSH public key for glados")
+    else:
+        print("[!] Init: no local SSH public key found; skipping key install")
     targets = [target.hostname for target in OPS_TARGETS]
     executor = RemoteExecutor(teams)
     attacks = AttackModules(executor)
@@ -138,38 +173,68 @@ def run_init_sequence(teams: list[int]) -> None:
 
     print("[+] Init: ensure access")
     results = attacks.ensure_remote_access(targets)
-    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
     _summarize_failures("ensure_access", results)
+    _summarize_skips("ensure_access", results)
     results = _retry_failures("ensure_access", attacks.ensure_remote_access, targets, results)
     _summarize_failures("ensure_access retry", results)
+    _summarize_skips("ensure_access retry", results)
 
     print("[+] Init: deploy persistence")
     results = deployer.deploy(targets)
-    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
     _summarize_failures("deploy_persistence", results)
+    _summarize_skips("deploy_persistence", results)
     results = _retry_failures("deploy_persistence", deployer.deploy, targets, results)
     _summarize_failures("deploy_persistence retry", results)
+    _summarize_skips("deploy_persistence retry", results)
 
     print("[+] Init: create themed users")
     results = attacks.create_themed_users(targets)
-    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
     _summarize_failures("create_themed_users", results)
+    _summarize_skips("create_themed_users", results)
     results = _retry_failures("create_themed_users", attacks.create_themed_users, targets, results)
     _summarize_failures("create_themed_users retry", results)
+    _summarize_skips("create_themed_users retry", results)
 
     print("[+] Init: create glados admin")
     results = attacks.create_glados_admin(targets)
-    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
     _summarize_failures("create_glados_admin", results)
+    _summarize_skips("create_glados_admin", results)
     results = _retry_failures("create_glados_admin", attacks.create_glados_admin, targets, results)
     _summarize_failures("create_glados_admin retry", results)
+    _summarize_skips("create_glados_admin retry", results)
 
     print("[+] Init: install access maintenance tasks")
     results = attacks.install_access_tasks(targets)
-    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
     _summarize_failures("install_access_tasks", results)
+    _summarize_skips("install_access_tasks", results)
     results = _retry_failures("install_access_tasks", attacks.install_access_tasks, targets, results)
     _summarize_failures("install_access_tasks retry", results)
+    _summarize_skips("install_access_tasks retry", results)
 
 
 def interactive_menu(teams: list[int]) -> int:

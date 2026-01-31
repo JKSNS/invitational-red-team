@@ -124,8 +124,8 @@ The scripts will prompt for how many teams are playing and compute addresses acc
 | scalable | 73 | openSUSE 42.1 | SSH, HTTP |
 | skull | 74 | openSUSE 42.1 | SSH, HTTP |
 | safety | 12 | Fedora 34 | SSH, HTTP, FTP |
-| discouragement | 13 | NixOS 21.11 | SSH, HTTP |
-| storage | 14 | Ubuntu 18.04 | SSH, HTTP, MySQL |
+| discouragement | 13 | NixOS 21.11 | HTTP |
+| storage | 14 | Ubuntu 18.04 | SSH, HTTP, FTP, MySQL |
 | companion | 142 | Linux Mint 20 | SSH, HTTP |
 | cake | 143 | Arch Linux | SSH, HTTP |
 | contraption | 75 | FreeBSD 13.4 | SSH, HTTP |
@@ -205,6 +205,16 @@ python3 orchestrator/service_degradation.py --teams-count 12 --action stop_http 
 ```bash
 python3 orchestrator/user_management.py --teams-count 12 --action create_glados_admin --targets all
 ```
+
+#### Red Team Accounts
+
+| Account | Purpose | Privilege |
+|---------|---------|-----------|
+| `chell` | Default access account (pre-seeded on targets). | Standard user |
+| `glados` | Red team admin account created by init. | Admin group + sudoers entry when available |
+| `companion`, `atlas`, `pbody` | Themed accounts created by init. | Admin group membership when available |
+
+If a local SSH public key is available (`~/.ssh/id_ed25519.pub`, `id_rsa.pub`, or `id_ecdsa.pub`), `init_competition` will install it into `glados`'s `authorized_keys`. You can also set `APERTURE_SSH_PUBKEY` explicitly to control the key used.
 
 ### 6) Website Defacement
 

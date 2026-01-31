@@ -39,6 +39,23 @@ def report_failures(results: dict) -> None:
                 print(f"      {line}")
 
 
+def report_skips(results: dict) -> None:
+    skipped = results.get("skipped", [])
+    if not skipped:
+        return
+    print(f"[!] Skipped targets ({len(skipped)}):")
+    for skip in skipped:
+        output = (skip.get("output") or "").strip()
+        method = skip.get("method", "unknown")
+        print(
+            f"  - Team {skip.get('team')} | {skip.get('target')} "
+            f"({skip.get('ip')}) [{method}]"
+        )
+        if output:
+            for line in output.splitlines():
+                print(f"      {line}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="User management actions across all teams.")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
@@ -75,8 +92,13 @@ def main() -> int:
         "weaken_root_password": attacks.weaken_root_password,
     }
     results = action_map[args.action](targets)
-    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
     report_failures(results)
+    report_skips(results)
     return 0
 
 

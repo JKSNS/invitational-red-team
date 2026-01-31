@@ -3,6 +3,7 @@ import base64
 import concurrent.futures
 import json
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,6 +15,10 @@ from .common import TEAM_SUBNET_BASE, find_missing_binaries, get_red_team_ip
 DEFAULT_USER = "chell"
 DEFAULT_PASS = "Th3cake1salie!"
 REDTEAM_PASS = "password"
+
+
+def _get_ssh_pubkey() -> str:
+    return os.environ.get("APERTURE_SSH_PUBKEY", "").strip()
 
 THEMED_USERS = [
     ("companion", "thecake"),
@@ -47,8 +52,8 @@ DEFAULT_TARGETS = [
     Target("scalable", 73, "linux", ["ssh", "http"]),
     Target("skull", 74, "linux", ["ssh", "http"]),
     Target("safety", 12, "linux", ["ssh", "http", "ftp"]),
-    Target("discouragement", 13, "linux", ["ssh", "http"]),
-    Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
+    Target("discouragement", 13, "linux", ["http"]),
+    Target("storage", 14, "linux", ["ssh", "http", "ftp", "mysql"]),
     Target("companion", 142, "linux", ["ssh", "http"]),
     Target("cake", 143, "linux", ["ssh", "http"]),
     Target("contraption", 75, "linux", ["ssh", "http"]),
@@ -102,12 +107,15 @@ class RemoteExecutor:
         timeout: int = 30,
         ssh_key: Optional[str] = None,
     ) -> Tuple[bool, str]:
+        wrapped_cmd = f"sh -c {shlex.quote(cmd)}"
         base_cmd = [
             "ssh",
             "-o",
             "StrictHostKeyChecking=no",
             "-o",
             "UserKnownHostsFile=/dev/null",
+            "-o",
+            "LogLevel=ERROR",
             "-o",
             f"ConnectTimeout={timeout}",
             "-o",
@@ -117,7 +125,7 @@ class RemoteExecutor:
             base_cmd.extend(["-i", ssh_key])
         else:
             base_cmd = ["sshpass", "-p", passwd] + base_cmd
-        base_cmd.extend([f"{user}@{ip}", cmd])
+        base_cmd.extend([f"{user}@{ip}", wrapped_cmd])
         try:
             result = subprocess.run(base_cmd, capture_output=True, text=True, timeout=timeout + 10)
             success = result.returncode == 0
@@ -195,7 +203,7 @@ class RemoteExecutor:
     ) -> Dict[str, List[Dict]]:
         if ssh_key is None:
             ssh_key = self.ssh_key
-        results = {"success": [], "failed": []}
+        results = {"success": [], "failed": [], "skipped": []}
         missing_for_ssh = set()
         missing_for_winrm = set()
         if "ssh" in self.missing_binaries:
@@ -214,6 +222,18 @@ class RemoteExecutor:
                     continue
                 ip = target.wan_ip(team)
                 if target.os_type == "linux":
+                    if "ssh" not in target.services:
+                        results["skipped"].append(
+                            {
+                                "team": team,
+                                "target": target.hostname,
+                                "ip": ip,
+                                "success": True,
+                                "method": "ssh",
+                                "output": "Skipped: SSH not listed for target.",
+                            }
+                        )
+                        continue
                     if missing_for_ssh:
                         results["failed"].append(
                             {
@@ -221,6 +241,7 @@ class RemoteExecutor:
                                 "target": target.hostname,
                                 "ip": ip,
                                 "success": False,
+                                "method": "ssh",
                                 "output": f"Missing binaries for SSH: {', '.join(sorted(missing_for_ssh))}",
                             }
                         )
@@ -234,6 +255,7 @@ class RemoteExecutor:
                                 "target": target.hostname,
                                 "ip": ip,
                                 "success": False,
+                                "method": "winrm",
                                 "output": f"Missing binaries for WinRM: {', '.join(sorted(missing_for_winrm))}",
                             }
                         )
@@ -401,6 +423,18 @@ fi
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def create_glados_admin(self, targets: List[str]) -> Dict:
+        pubkey = _get_ssh_pubkey()
+        ssh_key_block = ""
+        if pubkey:
+            ssh_key_block = f'''
+SSH_PUBKEY='{pubkey}'
+if [ -n "$SSH_PUBKEY" ]; then
+    install -d -m 700 /home/glados/.ssh 2>/dev/null || mkdir -p /home/glados/.ssh
+    echo "$SSH_PUBKEY" >> /home/glados/.ssh/authorized_keys
+    chown -R glados:glados /home/glados/.ssh 2>/dev/null || true
+    chmod 600 /home/glados/.ssh/authorized_keys 2>/dev/null || true
+fi
+'''
         linux_cmd = f'''
 resolve_admin_group() {{
     for group in sudo wheel admin; do
@@ -467,6 +501,7 @@ Welcome to Aperture Science.
 You found the GLaDOS account. The password is simple.
 MOTD
 chown -R glados:glados /home/glados 2>/dev/null || true
+{ssh_key_block}
 echo "GLADOS_CREATED"
 '''
         windows_cmd = f'''
@@ -497,12 +532,46 @@ Write-Output "ADMIN_WEAKENED"
 
     def ensure_remote_access(self, targets: List[str]) -> Dict:
         linux_cmd = '''
+detect_os_id() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release 2>/dev/null || true
+        echo "${ID:-}"
+        return 0
+    fi
+    echo ""
+}
+install_ssh_server() {
+    os_id="$(detect_os_id)"
+    if [ "$os_id" = "nixos" ]; then
+        echo "NIXOS_SSH_INSTALL_SKIPPED"
+        return 0
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null 2>&1 || true
+        apt-get install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install openssh >/dev/null 2>&1 || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm openssh >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add openssh >/dev/null 2>&1 || true
+    elif command -v pkg >/dev/null 2>&1; then
+        pkg install -y openssh-portable >/dev/null 2>&1 || pkg install -y openssh >/dev/null 2>&1 || true
+    fi
+}
 ensure_ssh() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
         systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
     elif command -v service >/dev/null 2>&1; then
         service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    elif command -v sysrc >/dev/null 2>&1; then
+        sysrc sshd_enable=YES >/dev/null 2>&1 || true
+        service sshd restart 2>/dev/null || true
     fi
 }
 open_firewall() {
@@ -517,6 +586,7 @@ open_firewall() {
         iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
     fi
 }
+install_ssh_server
 ensure_ssh
 open_firewall
 echo "ACCESS_OPENED"
@@ -541,12 +611,55 @@ Write-Output "ACCESS_OPENED"
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def install_access_tasks(self, targets: List[str]) -> Dict:
+        pubkey = _get_ssh_pubkey()
+        ssh_key_block = ""
+        if pubkey:
+            ssh_key_block = f'''
+SSH_PUBKEY='{pubkey}'
+if [ -n "$SSH_PUBKEY" ]; then
+    install -d -m 700 /home/glados/.ssh 2>/dev/null || mkdir -p /home/glados/.ssh
+    echo "$SSH_PUBKEY" >> /home/glados/.ssh/authorized_keys
+    chown -R glados:glados /home/glados/.ssh 2>/dev/null || true
+    chmod 600 /home/glados/.ssh/authorized_keys 2>/dev/null || true
+fi
+'''
         linux_cmd = f'''
 ACCESS_DIR="/tmp/.aperture_science"
 ACCESS_SCRIPT="$ACCESS_DIR/access_maintenance.sh"
 mkdir -p "$ACCESS_DIR"
 cat > "$ACCESS_SCRIPT" << 'ACCESS'
 #!/bin/sh
+detect_os_id() {{
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release 2>/dev/null || true
+        echo "${{ID:-}}"
+        return 0
+    fi
+    echo ""
+}}
+install_ssh_server() {{
+    os_id="$(detect_os_id)"
+    if [ "$os_id" = "nixos" ]; then
+        echo "NIXOS_SSH_INSTALL_SKIPPED"
+        return 0
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null 2>&1 || true
+        apt-get install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install openssh >/dev/null 2>&1 || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm openssh >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add openssh >/dev/null 2>&1 || true
+    elif command -v pkg >/dev/null 2>&1; then
+        pkg install -y openssh-portable >/dev/null 2>&1 || pkg install -y openssh >/dev/null 2>&1 || true
+    fi
+}}
 resolve_admin_group() {{
     for group in sudo wheel admin; do
         if getent group "$group" >/dev/null 2>&1; then
@@ -605,6 +718,9 @@ ensure_ssh() {{
         systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
     elif command -v service >/dev/null 2>&1; then
         service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    elif command -v sysrc >/dev/null 2>&1; then
+        sysrc sshd_enable=YES >/dev/null 2>&1 || true
+        service sshd restart 2>/dev/null || true
     fi
 }}
 open_firewall() {{
@@ -626,6 +742,8 @@ if command -v sudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
     echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
     chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 fi
+{ssh_key_block}
+install_ssh_server
 ensure_ssh
 open_firewall
 ACCESS
