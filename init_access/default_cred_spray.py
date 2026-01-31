@@ -401,8 +401,6 @@ class SprayEngine:
             "ssh": [],
             "smb": [],
             "winrm": [],
-            "ftp": [],
-            "mysql": [],
         }
         self.lock = threading.Lock()
     
@@ -473,44 +471,6 @@ class SprayEngine:
                     self.results["winrm"].append(result)
                 logger.info(f"[Team {team_num}] WinRM SUCCESS on {target.hostname}: {creds.username}")
         
-        # FTP
-        if target.os_type == "linux" and "ftp" in target.services:
-            success, msg = FTPSpray.spray(wan_ip, creds)
-            if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "ftp",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg,
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["ftp"].append(result)
-                logger.info(f"[Team {team_num}] FTP SUCCESS on {target.hostname}: {creds.username}")
-
-        # MySQL
-        if target.os_type == "linux" and "mysql" in target.services:
-            success, msg = MySQLSpray.spray(wan_ip, creds)
-            if not success and "Missing binaries" in msg:
-                logger.warning(f"[Team {team_num}] MySQL skipped on {target.hostname}: {msg}")
-            if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "mysql",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg,
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["mysql"].append(result)
-                logger.info(f"[Team {team_num}] MySQL SUCCESS on {target.hostname}: {creds.username}")
-
-        return results
-    
     def run_spray(self, creds_list: List[Credentials] = None) -> Dict:
         """Run the full credential spray"""
         if creds_list is None:
@@ -640,7 +600,7 @@ Examples:
     ║   "Science isn't about WHY. It's about WHY NOT."                  ║
     ╚═══════════════════════════════════════════════════════════════════╝
     """)
-    
+
     # Parse teams
     if not args.teams:
         teams = resolve_team_numbers()

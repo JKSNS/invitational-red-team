@@ -10,7 +10,7 @@ ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import resolve_team_numbers
+from lib.common import free_port, resolve_team_numbers
 from lib.operations import TARGETS as OPS_TARGETS
 
 
@@ -86,6 +86,9 @@ def interactive_menu(teams: list[int]) -> int:
 
         choice = input("Choice: ").strip().upper()
         if choice == "1":
+            freed, message = free_port(8080, auto_install=True)
+            if message:
+                print(f"[+] C2 preflight: {message}")
             run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
             continue
         if choice == "2":
@@ -188,6 +191,9 @@ def main() -> int:
         return interactive_menu(teams)
 
     if args.action == "c2":
+        freed, message = free_port(8080, auto_install=True)
+        if message:
+            print(f"[+] C2 preflight: {message}")
         return run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
     if args.action == "credential_spray":
         return run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", format_teams_arg(teams)])
