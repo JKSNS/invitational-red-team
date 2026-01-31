@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,15 @@ def safe_input(prompt: str) -> Optional[str]:
     try:
         return input(prompt)
     except EOFError:
+        try:
+            if os.path.exists("/dev/tty"):
+                with open("/dev/tty", "r", encoding="utf-8", errors="ignore") as tty:
+                    sys.stdout.write(prompt)
+                    sys.stdout.flush()
+                    line = tty.readline()
+                    return line.rstrip("\n") if line else None
+        except OSError:
+            return None
         return None
 
 
@@ -31,7 +41,7 @@ def prompt_targets() -> Optional[str]:
     print("Targets list:")
     for idx, target in enumerate(OPS_TARGETS, start=1):
         print(f"  {idx}. {target.hostname} ({target.os_type})")
-    print(f"  All: all | Linux: linux | Windows: windows | Back: B")
+    print("  All: all or A | Linux: linux | Windows: windows | Back: B")
     while True:
         choice = safe_input("Targets: ")
         if choice is None:
@@ -41,6 +51,8 @@ def prompt_targets() -> Optional[str]:
             return "all"
         if choice.upper() == "B":
             return None
+        if choice.upper() == "A":
+            return "all"
         lowered = choice.lower()
         if lowered in {"all", "linux", "windows"}:
             return lowered
@@ -83,6 +95,37 @@ def format_teams_arg(teams: list[int]) -> str:
     return ",".join(str(team) for team in teams)
 
 
+def run_init_sequence(teams: list[int]) -> None:
+    teams_arg = format_teams_arg(teams)
+    print("[+] Init: credential spray")
+    run_script(
+        ROOT_DIR / "init_access" / "default_cred_spray.py",
+        ["--teams", teams_arg, "--targets", "all"],
+    )
+    print("[+] Init: deploy persistence")
+    run_script(SCRIPT_DIR / "persistence.py", ["--teams", teams_arg, "--targets", "all"])
+    print("[+] Init: create themed users")
+    run_script(
+        SCRIPT_DIR / "user_management.py",
+        ["--teams", teams_arg, "--targets", "all", "--action", "create_themed_users"],
+    )
+    print("[+] Init: create glados admin")
+    run_script(
+        SCRIPT_DIR / "user_management.py",
+        ["--teams", teams_arg, "--targets", "all", "--action", "create_glados_admin"],
+    )
+    print("[+] Init: ensure access")
+    run_script(
+        SCRIPT_DIR / "access_maintenance.py",
+        ["--teams", teams_arg, "--targets", "all", "--action", "ensure_access"],
+    )
+    print("[+] Init: install access maintenance tasks")
+    run_script(
+        SCRIPT_DIR / "access_maintenance.py",
+        ["--teams", teams_arg, "--targets", "all", "--action", "install_access_tasks"],
+    )
+
+
 def interactive_menu(teams: list[int]) -> int:
     teams_arg = format_teams_arg(teams)
     while True:
@@ -95,6 +138,8 @@ def interactive_menu(teams: list[int]) -> int:
         print("5. Service degradation")
         print("6. Website defacement")
         print("7. Chaos mode")
+        print("8. Init competition")
+        print("9. Access maintenance")
         print("Q. Quit")
 
         choice = safe_input("Choice: ")
@@ -109,7 +154,13 @@ def interactive_menu(teams: list[int]) -> int:
             run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
             continue
         if choice == "2":
-            run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", teams_arg])
+            targets = prompt_targets()
+            if targets is None:
+                continue
+            run_script(
+                ROOT_DIR / "init_access" / "default_cred_spray.py",
+                ["--teams", teams_arg, "--targets", targets],
+            )
             continue
         if choice == "3":
             targets = prompt_targets()
@@ -179,6 +230,24 @@ def interactive_menu(teams: list[int]) -> int:
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
+        if choice == "8":
+            run_init_sequence(teams)
+            continue
+        if choice == "9":
+            targets = prompt_targets()
+            if targets is None:
+                continue
+            action = prompt_action(
+                "Access maintenance actions:",
+                ["ensure_access", "install_access_tasks"],
+            )
+            if action is None:
+                continue
+            run_script(
+                SCRIPT_DIR / "access_maintenance.py",
+                ["--teams", teams_arg, "--targets", targets, "--action", action],
+            )
+            continue
         if choice == "Q":
             print("Goodbye.")
             return 0
@@ -197,6 +266,8 @@ def main() -> int:
         "service_degradation",
         "defacement",
         "chaos_mode",
+        "access_maintenance",
+        "init_competition",
     ])
     parser.add_argument("--targets", default="all", help="all, linux, windows, or comma-separated hostnames")
     parser.add_argument("--subaction", help="Action for user/service/defacement/chaos")
@@ -213,7 +284,10 @@ def main() -> int:
             print(f"[+] C2 preflight: {message}")
         return run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
     if args.action == "credential_spray":
-        return run_script(ROOT_DIR / "init_access" / "default_cred_spray.py", ["--teams", format_teams_arg(teams)])
+        return run_script(
+            ROOT_DIR / "init_access" / "default_cred_spray.py",
+            ["--teams", format_teams_arg(teams), "--targets", args.targets],
+        )
     if args.action == "persistence":
         return run_script(SCRIPT_DIR / "persistence.py", ["--teams", format_teams_arg(teams), "--targets", args.targets])
     if args.action == "user_management":
@@ -248,6 +322,17 @@ def main() -> int:
             SCRIPT_DIR / "chaos_mode.py",
             ["--teams", format_teams_arg(teams), "--targets", args.targets, "--action", args.subaction],
         )
+    if args.action == "access_maintenance":
+        if not args.subaction:
+            print("Provide --subaction for access_maintenance.")
+            return 1
+        return run_script(
+            SCRIPT_DIR / "access_maintenance.py",
+            ["--teams", format_teams_arg(teams), "--targets", args.targets, "--action", args.subaction],
+        )
+    if args.action == "init_competition":
+        run_init_sequence(teams)
+        return 0
     return 0
 
 

