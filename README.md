@@ -37,7 +37,10 @@ python3 orchestrator/glados.py
 # Start C2 beacon receiver
 python3 payloads/portal_gun.py --port 8080
 
-# Run credential spray
+# Init competition (runs the full bootstrap sequence)
+python3 orchestrator/glados.py --teams-count 12 --action init_competition
+
+# Run credential spray (optional)
 python3 init_access/default_cred_spray.py --teams 1-12
 
 # Deploy persistence
@@ -107,14 +110,24 @@ The scripts will prompt for how many teams are playing and compute addresses acc
 
 | Hostname | Host ID | OS | Services |
 |----------|---------|----|----------|
+| schrodinger | 1 | OPNsense | SSH, HTTP |
 | curiosity | 140 | Win Server 2016 | SMB, WinRM, RDP |
 | morality | 10 | Win Server 2016 | SMB, WinRM, HTTP |
+| intelligence | 11 | Win Server 2019 | SMB, WinRM, RDP |
 | anger | 70 | Win Server 2019 | SMB, WinRM, DNS |
+| fact | 71 | Win Server 2022 | SMB, WinRM, RDP |
 | space | 141 | Windows 10 | SMB, WinRM, RDP |
+| adventure | 72 | Windows XP | SMB, RDP |
 | scalable | 73 | openSUSE 42.1 | SSH, HTTP |
+| skull | 74 | openSUSE 42.1 | SSH, HTTP |
 | safety | 12 | Fedora 34 | SSH, HTTP, FTP |
-| storage | 14 | Ubuntu 18.04 | SSH, HTTP, MySQL |
+| discouragement | 13 | NixOS 21.11 | HTTP |
+| storage | 14 | Ubuntu 18.04 | SSH, HTTP, FTP, MySQL |
+| companion | 142 | Linux Mint 20 | SSH, HTTP |
 | cake | 143 | Arch Linux | SSH, HTTP |
+| contraption | 75 | FreeBSD 13.4 | SSH, HTTP |
+
+Targets can be overridden by setting `APERTURE_TARGETS_FILE` to a JSON file that matches the schema in `lib/operations.py`.
 
 ## Operations Guide
 
@@ -164,6 +177,20 @@ python3 orchestrator/persistence.py --teams-count 12 --targets all
 
 Persistence uses the local IP from `ip a` for beacon callbacks. The Windows workflow uses a scheduled task plus a Run key to call back into the C2 server.
 
+### 3.5) Init Competition (Bootstrap Sequence)
+
+```bash
+python3 orchestrator/glados.py --teams-count 12 --action init_competition
+```
+
+This wraps the entire "start of competition" workflow in one command:
+
+1. Ensures access by enabling SSH/WinRM and opening firewall rules.
+2. Deploys persistence (Linux cron + Windows scheduled task/Run key).
+3. Creates themed users on Linux/Windows targets.
+4. Creates the `glados` admin account with the red team password.
+5. Installs recurring access maintenance tasks to keep access available.
+
 ### 4) Service Degradation
 
 ```bash
@@ -175,6 +202,16 @@ python3 orchestrator/service_degradation.py --teams-count 12 --action stop_http 
 ```bash
 python3 orchestrator/user_management.py --teams-count 12 --action create_glados_admin --targets all
 ```
+
+#### Red Team Accounts
+
+| Account | Purpose | Privilege |
+|---------|---------|-----------|
+| `chell` | Default access account (pre-seeded on targets). | Standard user |
+| `glados` | Red team admin account created by init. | Admin group + sudoers entry when available |
+| `companion`, `atlas`, `pbody` | Themed accounts created by init. | Admin group membership when available |
+
+If a local SSH public key is available (`~/.ssh/id_ed25519.pub`, `id_rsa.pub`, or `id_ecdsa.pub`), `init_competition` will install it into `glados`'s `authorized_keys`. You can also set `APERTURE_SSH_PUBKEY` explicitly to control the key used.
 
 ### 6) Website Defacement
 

