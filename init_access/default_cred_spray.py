@@ -384,13 +384,30 @@ class SprayEngine:
             "smb": [],
             "winrm": [],
         }
+        self.result_map: Dict[str, Dict[Tuple[int, str, str], Dict]] = {
+            "ssh": {},
+            "smb": {},
+            "winrm": {},
+        }
         self.lock = threading.Lock()
-        self.seen = set()
 
     def _format_creds(self, creds: Credentials, include_domain: bool) -> str:
         if include_domain and creds.domain:
             return f"{creds.domain}\\{creds.username}:{creds.password}"
         return f"{creds.username}:{creds.password}"
+
+    def _is_admin_creds(self, creds: Credentials, message: str) -> bool:
+        if "Admin" in message:
+            return True
+        return creds.username.lower() in {"administrator", "admin"}
+
+    def _is_admin_entry(self, entry: Dict) -> bool:
+        message = entry.get("message", "")
+        if "Admin" in message:
+            return True
+        creds_label = entry.get("creds", "")
+        user = creds_label.split("\\")[-1].split(":")[0]
+        return user.lower() in {"administrator", "admin"}
 
     def _record_result(
         self,
@@ -403,21 +420,25 @@ class SprayEngine:
         include_domain: bool,
     ) -> None:
         creds_label = self._format_creds(creds, include_domain)
-        key = (service, team_num, target.hostname, ip, creds_label)
+        key = (team_num, target.hostname, ip)
         with self.lock:
-            if key in self.seen:
+            existing = self.result_map[service].get(key)
+            entry = {
+                "team": team_num,
+                "target": target.hostname,
+                "ip": ip,
+                "service": service,
+                "creds": creds_label,
+                "message": message,
+            }
+            if existing:
+                existing_admin = self._is_admin_entry(existing)
+                incoming_admin = self._is_admin_creds(creds, message)
+                if incoming_admin and not existing_admin:
+                    self.result_map[service][key] = entry
                 return
-            self.seen.add(key)
-            self.results[service].append(
-                {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": ip,
-                    "service": service,
-                    "creds": creds_label,
-                    "message": message,
-                }
-            )
+            self.result_map[service][key] = entry
+            self.results[service] = list(self.result_map[service].values())
     
     def spray_target(self, team_num: int, target: Target, creds: Credentials) -> List[Dict]:
         """Spray a single target with credentials"""
