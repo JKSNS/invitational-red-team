@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from .common import TEAM_SUBNET_BASE, get_red_team_ip
+from .common import TEAM_SUBNET_BASE, find_missing_binaries, get_red_team_ip
 
 DEFAULT_USER = "chell"
 DEFAULT_PASS = "Th3cake1salie!"
@@ -45,6 +45,7 @@ class RemoteExecutor:
         self.teams = teams
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
         self.ssh_key = ssh_key
+        self.missing_binaries = find_missing_binaries(["ssh", "sshpass", "crackmapexec", "timeout"])
 
     def ssh_exec(
         self,
@@ -120,6 +121,17 @@ class RemoteExecutor:
         if ssh_key is None:
             ssh_key = self.ssh_key
         results = {"success": [], "failed": []}
+        missing_for_ssh = set()
+        missing_for_winrm = set()
+        if "ssh" in self.missing_binaries:
+            missing_for_ssh.add("ssh")
+        if "sshpass" in self.missing_binaries and ssh_key is None:
+            missing_for_ssh.add("sshpass")
+        if "crackmapexec" in self.missing_binaries:
+            missing_for_winrm.add("crackmapexec")
+        if "timeout" in self.missing_binaries:
+            missing_for_winrm.add("timeout")
+
         tasks = []
         for team in self.teams:
             for target in TARGETS:
@@ -127,8 +139,30 @@ class RemoteExecutor:
                     continue
                 ip = target.wan_ip(team)
                 if target.os_type == "linux":
+                    if missing_for_ssh:
+                        results["failed"].append(
+                            {
+                                "team": team,
+                                "target": target.hostname,
+                                "ip": ip,
+                                "success": False,
+                                "output": f"Missing binaries for SSH: {', '.join(sorted(missing_for_ssh))}",
+                            }
+                        )
+                        continue
                     tasks.append((team, target, ip, cmd_linux, "ssh"))
                 else:
+                    if missing_for_winrm:
+                        results["failed"].append(
+                            {
+                                "team": team,
+                                "target": target.hostname,
+                                "ip": ip,
+                                "success": False,
+                                "output": f"Missing binaries for WinRM: {', '.join(sorted(missing_for_winrm))}",
+                            }
+                        )
+                        continue
                     tasks.append((team, target, ip, cmd_windows, "winrm"))
 
         def execute_task(task):

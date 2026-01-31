@@ -13,21 +13,27 @@ import argparse
 import http.server
 import json
 import logging
+import os
 import socketserver
 import sqlite3
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 from urllib.parse import parse_qs, urlparse
-import os
 
 
 # Configuration
 
 
-LOG_DIR = Path("/var/log/aperture")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from lib.common import get_log_dir
+
+LOG_DIR = get_log_dir("aperture")
 DB_PATH = LOG_DIR / "portal_gun.db"
 
 logging.basicConfig(

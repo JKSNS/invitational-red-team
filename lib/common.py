@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Optional
@@ -87,8 +88,26 @@ def resolve_team_numbers(
     if teams_arg:
         return parse_team_numbers(teams_arg)
 
+    if team_count is not None:
+        return build_team_numbers(team_count)
+
     team_count = prompt_team_count(team_count)
     return prompt_team_list(team_count)
+
+
+def get_log_dir(app_name: str = "aperture") -> Path:
+    log_dir = Path("/var/log") / app_name
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir
+    except OSError:
+        fallback = Path.home() / f".{app_name}" / "logs"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def find_missing_binaries(binaries: List[str]) -> List[str]:
+    return [binary for binary in binaries if shutil.which(binary) is None]
 
 
 def get_red_team_ip() -> str:
