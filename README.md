@@ -37,7 +37,10 @@ python3 orchestrator/glados.py
 # Start C2 beacon receiver
 python3 payloads/portal_gun.py --port 8080
 
-# Run credential spray
+# Init competition (runs the full bootstrap sequence)
+python3 orchestrator/glados.py --teams-count 12 --action init_competition
+
+# Run credential spray (optional)
 python3 init_access/default_cred_spray.py --teams 1-12
 
 # Deploy persistence
@@ -185,12 +188,11 @@ python3 orchestrator/glados.py --teams-count 12 --action init_competition
 
 This wraps the entire "start of competition" workflow in one command:
 
-1. Runs the default credential spray across all targets.
+1. Ensures access by enabling SSH/WinRM and opening firewall rules.
 2. Deploys persistence (Linux cron + Windows scheduled task/Run key).
 3. Creates themed users on Linux/Windows targets.
 4. Creates the `glados` admin account with the red team password.
-5. Ensures access by enabling SSH/WinRM and opening firewall rules.
-6. Installs recurring access maintenance tasks to keep access available.
+5. Installs recurring access maintenance tasks to keep access available.
 
 ### 4) Service Degradation
 

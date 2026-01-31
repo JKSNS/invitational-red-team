@@ -22,6 +22,23 @@ def parse_targets(choice: str) -> list:
     return [t.strip() for t in choice.split(",") if t.strip()]
 
 
+def report_failures(results: dict) -> None:
+    failures = results.get("failed", [])
+    if not failures:
+        return
+    print(f"[!] Failure details ({len(failures)}):")
+    for failure in failures:
+        output = (failure.get("output") or "").strip()
+        method = failure.get("method", "unknown")
+        print(
+            f"  - Team {failure.get('team')} | {failure.get('target')} "
+            f"({failure.get('ip')}) [{method}]"
+        )
+        if output:
+            for line in output.splitlines():
+                print(f"      {line}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Access maintenance actions across all teams.")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
@@ -49,6 +66,7 @@ def main() -> int:
     }
     results = action_map[args.action](targets)
     print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    report_failures(results)
     return 0
 
 

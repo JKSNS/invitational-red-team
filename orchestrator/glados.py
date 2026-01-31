@@ -12,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from lib.common import free_port, resolve_team_numbers
-from lib.operations import TARGETS as OPS_TARGETS
+from lib.operations import AttackModules, PersistenceDeployer, RemoteExecutor, TARGETS as OPS_TARGETS
 
 
 def run_script(script_path: Path, args: list) -> int:
@@ -95,35 +95,81 @@ def format_teams_arg(teams: list[int]) -> str:
     return ",".join(str(team) for team in teams)
 
 
+def _summarize_failures(label: str, results: dict) -> None:
+    failures = results.get("failed", [])
+    if not failures:
+        return
+    print(f"[!] {label} failures ({len(failures)}):")
+    for failure in failures:
+        output = (failure.get("output") or "").strip()
+        method = failure.get("method", "unknown")
+        print(
+            f"  - Team {failure.get('team')} | {failure.get('target')} "
+            f"({failure.get('ip')}) [{method}]"
+        )
+        if output:
+            for line in output.splitlines():
+                print(f"      {line}")
+
+
+def _retry_failures(
+    label: str,
+    action,
+    base_targets: list[str],
+    results: dict,
+    attempts: int = 1,
+) -> dict:
+    failures = results.get("failed", [])
+    if not failures or attempts < 1:
+        return results
+    failed_targets = sorted({failure["target"] for failure in failures})
+    if not failed_targets:
+        return results
+    print(f"[!] Retrying {label} on failed targets: {failed_targets}")
+    retry_results = action(failed_targets)
+    return retry_results
+
+
 def run_init_sequence(teams: list[int]) -> None:
-    teams_arg = format_teams_arg(teams)
-    print("[+] Init: credential spray")
-    run_script(
-        ROOT_DIR / "init_access" / "default_cred_spray.py",
-        ["--teams", teams_arg, "--targets", "all"],
-    )
-    print("[+] Init: deploy persistence")
-    run_script(SCRIPT_DIR / "persistence.py", ["--teams", teams_arg, "--targets", "all"])
-    print("[+] Init: create themed users")
-    run_script(
-        SCRIPT_DIR / "user_management.py",
-        ["--teams", teams_arg, "--targets", "all", "--action", "create_themed_users"],
-    )
-    print("[+] Init: create glados admin")
-    run_script(
-        SCRIPT_DIR / "user_management.py",
-        ["--teams", teams_arg, "--targets", "all", "--action", "create_glados_admin"],
-    )
+    targets = [target.hostname for target in OPS_TARGETS]
+    executor = RemoteExecutor(teams)
+    attacks = AttackModules(executor)
+    deployer = PersistenceDeployer(executor)
+
     print("[+] Init: ensure access")
-    run_script(
-        SCRIPT_DIR / "access_maintenance.py",
-        ["--teams", teams_arg, "--targets", "all", "--action", "ensure_access"],
-    )
+    results = attacks.ensure_remote_access(targets)
+    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    _summarize_failures("ensure_access", results)
+    results = _retry_failures("ensure_access", attacks.ensure_remote_access, targets, results)
+    _summarize_failures("ensure_access retry", results)
+
+    print("[+] Init: deploy persistence")
+    results = deployer.deploy(targets)
+    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    _summarize_failures("deploy_persistence", results)
+    results = _retry_failures("deploy_persistence", deployer.deploy, targets, results)
+    _summarize_failures("deploy_persistence retry", results)
+
+    print("[+] Init: create themed users")
+    results = attacks.create_themed_users(targets)
+    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    _summarize_failures("create_themed_users", results)
+    results = _retry_failures("create_themed_users", attacks.create_themed_users, targets, results)
+    _summarize_failures("create_themed_users retry", results)
+
+    print("[+] Init: create glados admin")
+    results = attacks.create_glados_admin(targets)
+    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    _summarize_failures("create_glados_admin", results)
+    results = _retry_failures("create_glados_admin", attacks.create_glados_admin, targets, results)
+    _summarize_failures("create_glados_admin retry", results)
+
     print("[+] Init: install access maintenance tasks")
-    run_script(
-        SCRIPT_DIR / "access_maintenance.py",
-        ["--teams", teams_arg, "--targets", "all", "--action", "install_access_tasks"],
-    )
+    results = attacks.install_access_tasks(targets)
+    print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+    _summarize_failures("install_access_tasks", results)
+    results = _retry_failures("install_access_tasks", attacks.install_access_tasks, targets, results)
+    _summarize_failures("install_access_tasks retry", results)
 
 
 def interactive_menu(teams: list[int]) -> int:
@@ -131,14 +177,14 @@ def interactive_menu(teams: list[int]) -> int:
     while True:
         print("Aperture Science Red Team Orchestrator")
         print(f"Active teams: {teams}")
-        print("1. Start C2 server")
-        print("2. Credential spray")
-        print("3. Deploy persistence")
-        print("4. User management")
-        print("5. Service degradation")
-        print("6. Website defacement")
-        print("7. Chaos mode")
-        print("8. Init competition")
+        print("1. Init competition")
+        print("2. Start C2 server")
+        print("3. Credential spray")
+        print("4. Deploy persistence")
+        print("5. User management")
+        print("6. Service degradation")
+        print("7. Website defacement")
+        print("8. Chaos mode")
         print("9. Access maintenance")
         print("Q. Quit")
 
@@ -148,12 +194,15 @@ def interactive_menu(teams: list[int]) -> int:
             return 0
         choice = choice.strip().upper()
         if choice == "1":
+            run_init_sequence(teams)
+            continue
+        if choice == "2":
             freed, message = free_port(8080, auto_install=True)
             if message:
                 print(f"[+] C2 preflight: {message}")
             run_script(ROOT_DIR / "payloads" / "portal_gun.py", ["--port", "8080"])
             continue
-        if choice == "2":
+        if choice == "3":
             targets = prompt_targets()
             if targets is None:
                 continue
@@ -162,13 +211,13 @@ def interactive_menu(teams: list[int]) -> int:
                 ["--teams", teams_arg, "--targets", targets],
             )
             continue
-        if choice == "3":
+        if choice == "4":
             targets = prompt_targets()
             if targets is None:
                 continue
             run_script(SCRIPT_DIR / "persistence.py", ["--teams", teams_arg, "--targets", targets])
             continue
-        if choice == "4":
+        if choice == "5":
             targets = prompt_targets()
             if targets is None:
                 continue
@@ -189,7 +238,7 @@ def interactive_menu(teams: list[int]) -> int:
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
-        if choice == "5":
+        if choice == "6":
             targets = prompt_targets()
             if targets is None:
                 continue
@@ -204,7 +253,7 @@ def interactive_menu(teams: list[int]) -> int:
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
-        if choice == "6":
+        if choice == "7":
             targets = prompt_targets()
             if targets is None:
                 continue
@@ -216,7 +265,7 @@ def interactive_menu(teams: list[int]) -> int:
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
             continue
-        if choice == "7":
+        if choice == "8":
             targets = prompt_targets()
             if targets is None:
                 continue
@@ -229,9 +278,6 @@ def interactive_menu(teams: list[int]) -> int:
                 SCRIPT_DIR / "chaos_mode.py",
                 ["--teams", teams_arg, "--targets", targets, "--action", action],
             )
-            continue
-        if choice == "8":
-            run_init_sequence(teams)
             continue
         if choice == "9":
             targets = prompt_targets()
