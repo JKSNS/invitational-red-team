@@ -390,23 +390,17 @@ class SprayEngine:
         self,
         teams: List[int],
         targets: List[Target],
-        enable_ftp: bool = True,
-        enable_mysql: bool = True,
         parallel: bool = True,
         max_workers: int = 50,
     ):
         self.teams = teams
         self.targets = targets
-        self.enable_ftp = enable_ftp
-        self.enable_mysql = enable_mysql
         self.parallel = parallel
         self.max_workers = max_workers
         self.results: Dict[str, List[Dict]] = {
             "ssh": [],
             "smb": [],
             "winrm": [],
-            "ftp": [],
-            "mysql": [],
         }
         self.lock = threading.Lock()
     
@@ -477,44 +471,6 @@ class SprayEngine:
                     self.results["winrm"].append(result)
                 logger.info(f"[Team {team_num}] WinRM SUCCESS on {target.hostname}: {creds.username}")
         
-        # FTP
-        if self.enable_ftp and target.os_type == "linux" and "ftp" in target.services:
-            success, msg = FTPSpray.spray(wan_ip, creds)
-            if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "ftp",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg,
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["ftp"].append(result)
-                logger.info(f"[Team {team_num}] FTP SUCCESS on {target.hostname}: {creds.username}")
-
-        # MySQL
-        if self.enable_mysql and target.os_type == "linux" and "mysql" in target.services:
-            success, msg = MySQLSpray.spray(wan_ip, creds)
-            if not success and "Missing binaries" in msg:
-                logger.warning(f"[Team {team_num}] MySQL skipped on {target.hostname}: {msg}")
-            if success:
-                result = {
-                    "team": team_num,
-                    "target": target.hostname,
-                    "ip": wan_ip,
-                    "service": "mysql",
-                    "creds": f"{creds.username}:{creds.password}",
-                    "message": msg,
-                }
-                results.append(result)
-                with self.lock:
-                    self.results["mysql"].append(result)
-                logger.info(f"[Team {team_num}] MySQL SUCCESS on {target.hostname}: {creds.username}")
-
-        return results
-    
     def run_spray(self, creds_list: List[Credentials] = None) -> Dict:
         """Run the full credential spray"""
         if creds_list is None:
@@ -628,10 +584,6 @@ Examples:
                         help="all, linux, windows, or comma-separated hostnames")
     parser.add_argument("--install-deps", action="store_true",
                         help="Attempt to install missing local dependencies")
-    parser.add_argument("--disable-ftp", action="store_true",
-                        help="Disable FTP spray module")
-    parser.add_argument("--disable-mysql", action="store_true",
-                        help="Disable MySQL spray module")
     
     args = parser.parse_args()
     
@@ -655,14 +607,7 @@ Examples:
     else:
         teams = resolve_team_numbers(args.teams)
 
-    if args.disable_ftp:
-        print("[*] FTP spray module disabled.")
-    if args.disable_mysql:
-        print("[*] MySQL spray module disabled.")
-
-    dependencies = ["ssh", "sshpass", "crackmapexec", "smbclient", "timeout"]
-    if not args.disable_mysql:
-        dependencies.append("mysql")
+    dependencies = ["ssh", "sshpass", "crackmapexec", "smbclient", "mysql", "timeout"]
     if args.install_deps:
         still_missing = attempt_install(dependencies)
         if still_missing:
@@ -712,8 +657,6 @@ Examples:
     engine = SprayEngine(
         teams=teams,
         targets=targets,
-        enable_ftp=not args.disable_ftp,
-        enable_mysql=not args.disable_mysql,
         parallel=not args.sequential,
         max_workers=args.workers,
     )
