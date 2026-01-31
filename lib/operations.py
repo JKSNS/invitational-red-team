@@ -36,14 +36,22 @@ class Target:
         return self.wan_ip(team)
 
 DEFAULT_TARGETS = [
+    Target("schrodinger", 1, "linux", ["ssh", "http"]),
     Target("curiosity", 140, "windows", ["smb", "winrm", "rdp"]),
     Target("morality", 10, "windows", ["smb", "winrm", "rdp", "http"]),
+    Target("intelligence", 11, "windows", ["smb", "winrm", "rdp"]),
     Target("anger", 70, "windows", ["smb", "winrm", "rdp", "dns"]),
+    Target("fact", 71, "windows", ["smb", "winrm", "rdp"]),
     Target("space", 141, "windows", ["smb", "winrm", "rdp"]),
+    Target("adventure", 72, "windows", ["smb", "rdp"]),
     Target("scalable", 73, "linux", ["ssh", "http"]),
+    Target("skull", 74, "linux", ["ssh", "http"]),
     Target("safety", 12, "linux", ["ssh", "http", "ftp"]),
+    Target("discouragement", 13, "linux", ["ssh", "http"]),
     Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
+    Target("companion", 142, "linux", ["ssh", "http"]),
     Target("cake", 143, "linux", ["ssh", "http"]),
+    Target("contraption", 75, "linux", ["ssh", "http"]),
 ]
 
 
@@ -292,23 +300,69 @@ Write-Output "PKILL_COMPLETE"
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def create_themed_users(self, targets: List[str]) -> Dict:
+        linux_header = r'''
+resolve_admin_group() {
+    for group in sudo wheel admin; do
+        if getent group "$group" >/dev/null 2>&1; then
+            echo "$group"
+            return 0
+        fi
+    done
+    return 1
+}
+add_user() {
+    user="$1"
+    comment="$2"
+    if id "$user" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -c "$comment" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -D "$user" 2>/dev/null || adduser --disabled-password --gecos "" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        pw useradd -n "$user" -m -s /bin/sh -c "$comment" 2>/dev/null || true
+        return 0
+    fi
+}
+set_password() {
+    user="$1"
+    passwd="$2"
+    if command -v chpasswd >/dev/null 2>&1; then
+        echo "$user:$passwd" | chpasswd 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        printf '%s' "$passwd" | pw usermod "$user" -h 0 2>/dev/null || true
+    fi
+}
+add_to_admin_group() {
+    user="$1"
+    group="$(resolve_admin_group || true)"
+    if [ -n "$group" ]; then
+        if command -v usermod >/dev/null 2>&1; then
+            usermod -aG "$group" "$user" 2>/dev/null || true
+        elif command -v pw >/dev/null 2>&1; then
+            pw groupmod "$group" -m "$user" 2>/dev/null || true
+        elif command -v gpasswd >/dev/null 2>&1; then
+            gpasswd -a "$user" "$group" 2>/dev/null || true
+        fi
+    fi
+}
+'''
         linux_cmds = []
         for user, passwd in THEMED_USERS:
             linux_cmds.append(f'''
-if command -v useradd >/dev/null 2>&1; then
-    useradd -m -s /bin/bash {user} 2>/dev/null || true
-elif command -v adduser >/dev/null 2>&1; then
-    adduser -D {user} 2>/dev/null || adduser --disabled-password --gecos "" {user} 2>/dev/null || true
-fi
-echo "{user}:{passwd}" | chpasswd 2>/dev/null || true
-if getent group sudo >/dev/null 2>&1; then
-    usermod -aG sudo {user} 2>/dev/null || true
-elif getent group wheel >/dev/null 2>&1; then
-    usermod -aG wheel {user} 2>/dev/null || true
-fi
+add_user "{user}" "Aperture Science test subject"
+set_password "{user}" "{passwd}"
+add_to_admin_group "{user}"
 echo "Created user: {user}"
 ''')
-        linux_cmd = '\n'.join(linux_cmds) + '\necho "USERS_CREATED"'
+        linux_cmd = linux_header + '\n'.join(linux_cmds) + '\necho "USERS_CREATED"'
 
         windows_cmds = []
         for user, passwd in THEMED_USERS:
@@ -341,19 +395,65 @@ fi
 
     def create_glados_admin(self, targets: List[str]) -> Dict:
         linux_cmd = f'''
-if command -v useradd >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -c "Genetic Lifeform and Disk Operating System" glados 2>/dev/null || true
-elif command -v adduser >/dev/null 2>&1; then
-    adduser -D glados 2>/dev/null || adduser --disabled-password --gecos "" glados 2>/dev/null || true
+resolve_admin_group() {{
+    for group in sudo wheel admin; do
+        if getent group "$group" >/dev/null 2>&1; then
+            echo "$group"
+            return 0
+        fi
+    done
+    return 1
+}}
+add_user() {{
+    user="$1"
+    comment="$2"
+    if id "$user" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -c "$comment" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -D "$user" 2>/dev/null || adduser --disabled-password --gecos "" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        pw useradd -n "$user" -m -s /bin/sh -c "$comment" 2>/dev/null || true
+        return 0
+    fi
+}}
+set_password() {{
+    user="$1"
+    passwd="$2"
+    if command -v chpasswd >/dev/null 2>&1; then
+        echo "$user:$passwd" | chpasswd 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        printf '%s' "$passwd" | pw usermod "$user" -h 0 2>/dev/null || true
+    fi
+}}
+add_to_admin_group() {{
+    user="$1"
+    group="$(resolve_admin_group || true)"
+    if [ -n "$group" ]; then
+        if command -v usermod >/dev/null 2>&1; then
+            usermod -aG "$group" "$user" 2>/dev/null || true
+        elif command -v pw >/dev/null 2>&1; then
+            pw groupmod "$group" -m "$user" 2>/dev/null || true
+        elif command -v gpasswd >/dev/null 2>&1; then
+            gpasswd -a "$user" "$group" 2>/dev/null || true
+        fi
+    fi
+}}
+add_user "glados" "Genetic Lifeform and Disk Operating System"
+set_password "glados" "{REDTEAM_PASS}"
+add_to_admin_group "glados"
+if command -v sudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
+    echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
+    chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 fi
-echo "glados:{REDTEAM_PASS}" | chpasswd 2>/dev/null || true
-if getent group sudo >/dev/null 2>&1; then
-    usermod -aG sudo glados 2>/dev/null || true
-elif getent group wheel >/dev/null 2>&1; then
-    usermod -aG wheel glados 2>/dev/null || true
-fi
-echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
-chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 mkdir -p /home/glados
 cat > /home/glados/.motd << 'MOTD'
 Welcome to Aperture Science.
@@ -433,6 +533,58 @@ ACCESS_SCRIPT="$ACCESS_DIR/access_maintenance.sh"
 mkdir -p "$ACCESS_DIR"
 cat > "$ACCESS_SCRIPT" << 'ACCESS'
 #!/bin/sh
+resolve_admin_group() {{
+    for group in sudo wheel admin; do
+        if getent group "$group" >/dev/null 2>&1; then
+            echo "$group"
+            return 0
+        fi
+    done
+    return 1
+}}
+add_user() {{
+    user="$1"
+    comment="$2"
+    if id "$user" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -c "$comment" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -D "$user" 2>/dev/null || adduser --disabled-password --gecos "" "$user" 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        pw useradd -n "$user" -m -s /bin/sh -c "$comment" 2>/dev/null || true
+        return 0
+    fi
+}}
+set_password() {{
+    user="$1"
+    passwd="$2"
+    if command -v chpasswd >/dev/null 2>&1; then
+        echo "$user:$passwd" | chpasswd 2>/dev/null || true
+        return 0
+    fi
+    if command -v pw >/dev/null 2>&1; then
+        printf '%s' "$passwd" | pw usermod "$user" -h 0 2>/dev/null || true
+    fi
+}}
+add_to_admin_group() {{
+    user="$1"
+    group="$(resolve_admin_group || true)"
+    if [ -n "$group" ]; then
+        if command -v usermod >/dev/null 2>&1; then
+            usermod -aG "$group" "$user" 2>/dev/null || true
+        elif command -v pw >/dev/null 2>&1; then
+            pw groupmod "$group" -m "$user" 2>/dev/null || true
+        elif command -v gpasswd >/dev/null 2>&1; then
+            gpasswd -a "$user" "$group" 2>/dev/null || true
+        fi
+    fi
+}}
 ensure_ssh() {{
     if command -v systemctl >/dev/null 2>&1; then
         systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
@@ -453,19 +605,13 @@ open_firewall() {{
         iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
     fi
 }}
-if command -v useradd >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -c "Genetic Lifeform and Disk Operating System" glados 2>/dev/null || true
-elif command -v adduser >/dev/null 2>&1; then
-    adduser -D glados 2>/dev/null || adduser --disabled-password --gecos "" glados 2>/dev/null || true
+add_user "glados" "Genetic Lifeform and Disk Operating System"
+set_password "glados" "{REDTEAM_PASS}"
+add_to_admin_group "glados"
+if command -v sudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
+    echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
+    chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 fi
-echo "glados:{REDTEAM_PASS}" | chpasswd 2>/dev/null || true
-if getent group sudo >/dev/null 2>&1; then
-    usermod -aG sudo glados 2>/dev/null || true
-elif getent group wheel >/dev/null 2>&1; then
-    usermod -aG wheel glados 2>/dev/null || true
-fi
-echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
-chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
 ensure_ssh
 open_firewall
 ACCESS
