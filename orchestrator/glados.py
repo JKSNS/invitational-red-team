@@ -19,6 +19,13 @@ def run_script(script_path: Path, args: list) -> int:
     return subprocess.call(cmd)
 
 
+def safe_input(prompt: str) -> Optional[str]:
+    try:
+        return input(prompt)
+    except EOFError:
+        return None
+
+
 def prompt_targets() -> Optional[str]:
     print("Targets: all, linux, windows, comma-separated hostnames, or numbers from the list")
     print("Targets list:")
@@ -26,7 +33,10 @@ def prompt_targets() -> Optional[str]:
         print(f"  {idx}. {target.hostname} ({target.os_type})")
     print(f"  All: all | Linux: linux | Windows: windows | Back: B")
     while True:
-        choice = input("Targets: ").strip()
+        choice = safe_input("Targets: ")
+        if choice is None:
+            return None
+        choice = choice.strip()
         if not choice:
             return "all"
         if choice.upper() == "B":
@@ -57,7 +67,10 @@ def prompt_action(label: str, actions: list) -> Optional[str]:
     for idx, action in enumerate(actions, start=1):
         print(f"{idx}. {action}")
     print("B. Back")
-    choice = input("Choice: ").strip()
+    choice = safe_input("Choice: ")
+    if choice is None:
+        return None
+    choice = choice.strip()
     if choice.upper() == "B":
         return None
     try:
@@ -84,7 +97,11 @@ def interactive_menu(teams: list[int]) -> int:
         print("7. Chaos mode")
         print("Q. Quit")
 
-        choice = input("Choice: ").strip().upper()
+        choice = safe_input("Choice: ")
+        if choice is None:
+            print("Goodbye.")
+            return 0
+        choice = choice.strip().upper()
         if choice == "1":
             freed, message = free_port(8080, auto_install=True)
             if message:
