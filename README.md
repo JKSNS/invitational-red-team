@@ -218,7 +218,7 @@ python3 orchestrator/user_management.py --teams-count 12 --action create_glados_
 |---------|---------|-----------|
 | `chell` | Default access account (pre-seeded on targets). | Standard user |
 | `glados` | Red team admin account created by init. | Admin group + sudoers entry when available |
-| `companion`, `atlas`, `pbody` | Themed accounts created by init. | Admin group membership when available |
+| `companion`, `atlas`, `pbody`, `bob`, `darth_vader`, `sally` | Themed accounts created by init. | Admin group membership when available |
 
 The red team password for admin/fun users is `Password123!`. The default `chell` account remains `Th3cake1salie!`.
 

