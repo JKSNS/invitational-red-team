@@ -89,6 +89,21 @@ curl http://TARGET/adminXXXX/ # Random admin folder name
    - CVE-2018-19126: SQL Injection in Attribute Group
    - CVE-2019-11876: Remote Code Execution
 
+### Persistence Ideas (Authorized, Minimal Impact)
+
+1. **Module Upload (Admin Required)**
+   - PrestaShop 1.7.x allows module uploads via the admin panel.
+   - If you gain admin access, you can upload a benign module that:
+     - Drops a simple health-check page under a controlled path.
+     - Logs access to a file for visibility (non-destructive).
+   - Always keep a clean uninstall path and document it.
+
+2. **Theme Template Modification**
+   - PrestaShop uses theme templates (e.g., `themes/<theme>/templates/`).
+   - If you need a low-impact marker, add a short comment or hidden HTML tag
+     in `index.tpl` and keep a backup for fast restoration.
+   - Avoid breaking storefront functionality.
+
 ### Testing Commands (Authorized Use Only)
 
 ```bash
@@ -155,6 +170,17 @@ gobuster dir -u http://TARGET/symfony/web -w /usr/share/wordlists/dirb/common.tx
 curl http://TARGET/symfony/web/index.php/api/v1/employees
 ```
 
+### Persistence Ideas (Authorized, Minimal Impact)
+
+1. **Document Attachment Uploads**
+   - OrangeHRM 4.x often supports attachments for employee records.
+   - Use a benign upload (text file) to verify write access and persistence,
+     then document location and cleanup steps.
+
+2. **Configuration Markers**
+   - If you have admin access, add a harmless configuration note or banner
+     that can be reverted (track in your notes for cleanup).
+
 ---
 
 ## WordPress Testing
@@ -216,6 +242,33 @@ admin:password
 admin:wordpress
 administrator:admin
 ```
+
+### Persistence Ideas (Authorized, Minimal Impact)
+
+1. **Theme/Plugin Editor (Admin Required)**
+   - WordPress allows editing theme files if enabled.
+   - Add a benign footer marker or a health-check endpoint, and keep a diff
+     for easy rollback.
+
+2. **Must-Use Plugin (MU-Plugin)**
+   - If you can write to `wp-content/mu-plugins/`, a tiny MU-plugin can provide
+     a safe beacon (e.g., a page that prints a fixed string).
+   - Ensure the plugin is minimal, documented, and removable.
+
+---
+
+## FTP Persistence Considerations (Service Boxes)
+
+FTP is often exposed on site boxes like `safety`/`storage`. If FTP maps to a web
+root, a simple and reversible persistence mechanism is:
+
+1. **Upload a Harmless Marker File**
+   - Example: `healthcheck.txt` or `status.html` with a static string.
+   - Confirm that it is reachable over HTTP (if the FTP root maps to web root).
+
+2. **Track Cleanup**
+   - Record exact paths and remove them during cleanup.
+   - Avoid uploading executable content unless explicitly authorized.
 
 ---
 
