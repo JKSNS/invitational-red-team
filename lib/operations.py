@@ -1331,3 +1331,21 @@ Set-ItemProperty -Path $RegPath -Name "CompanionCube" -Value "powershell.exe -Wi
 Write-Output "WHEATLEY_DEPLOYED"
 '''
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
+
+    def list_artifacts(self, targets: List[str]) -> Dict:
+        linux_cmd = '''
+if [ -d /tmp/.aperture_science ]; then
+    ls -al /tmp/.aperture_science
+else
+    echo "/tmp/.aperture_science missing"
+fi
+'''
+        windows_cmd = '''
+$ApertureDir = "$env:TEMP\\ApertureScience"
+if (Test-Path $ApertureDir) {
+    Get-ChildItem -Force $ApertureDir | Format-List
+} else {
+    Write-Output "$ApertureDir missing"
+}
+'''
+        return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)

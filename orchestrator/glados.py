@@ -141,6 +141,25 @@ def _summarize_skips(label: str, results: dict) -> None:
                 print(f"      {line}")
 
 
+def _summarize_success_outputs(label: str, results: dict) -> None:
+    successes = results.get("success", [])
+    if not successes:
+        return
+    print(f"[+] {label} output ({len(successes)}):")
+    for success in successes:
+        output = (success.get("output") or "").strip()
+        method = success.get("method", "unknown")
+        print(
+            f"  - Team {success.get('team')} | {success.get('target')} "
+            f"({success.get('ip')}) [{method}]"
+        )
+        if output:
+            for line in output.splitlines():
+                print(f"      {line}")
+        else:
+            print("      (no output)")
+
+
 def _retry_failures(
     label: str,
     action,
@@ -196,6 +215,17 @@ def run_init_sequence(teams: list[int]) -> None:
     results = _retry_failures("deploy_persistence", deployer.deploy, targets, results)
     _summarize_failures("deploy_persistence retry", results)
     _summarize_skips("deploy_persistence retry", results)
+
+    print("[+] Init: verify aperture artifacts")
+    results = deployer.list_artifacts(targets)
+    print(
+        f"Success: {len(results['success'])}, "
+        f"Failed: {len(results['failed'])}, "
+        f"Skipped: {len(results.get('skipped', []))}"
+    )
+    _summarize_success_outputs("aperture artifacts", results)
+    _summarize_failures("aperture artifacts", results)
+    _summarize_skips("aperture artifacts", results)
 
     print("[+] Init: create themed users")
     results = attacks.create_themed_users(targets)
