@@ -56,6 +56,23 @@ def report_skips(results: dict) -> None:
                 print(f"      {line}")
 
 
+def report_successes(results: dict) -> None:
+    successes = results.get("success", [])
+    if not successes:
+        return
+    print(f"[+] Success details ({len(successes)}):")
+    for success in successes:
+        output = (success.get("output") or "").strip()
+        method = success.get("method", "unknown")
+        print(
+            f"  - Team {success.get('team')} | {success.get('target')} "
+            f"({success.get('ip')}) [{method}]"
+        )
+        if output:
+            for line in output.splitlines():
+                print(f"      {line}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Deploy persistence across all teams.")
     parser.add_argument("--teams-count", type=int, help="Number of teams playing")
@@ -78,6 +95,7 @@ def main() -> int:
         f"Failed: {len(results['failed'])}, "
         f"Skipped: {len(results.get('skipped', []))}"
     )
+    report_successes(results)
     report_failures(results)
     report_skips(results)
     return 0

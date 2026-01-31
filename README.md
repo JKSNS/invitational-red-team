@@ -258,6 +258,8 @@ python3 orchestrator/defacement.py --teams-count 12 --action deface_prestashop -
 
 The defacement workflow now enumerates PrestaShop admin emails (CVE-2025-51586) before replacing templates. Use `--skip-prestashop-enum` if you need to bypass that step.
 
+By default, defacement will drop you into an SSH shell when you target a single team/host successfully. Use `--shell-on-success never` to disable this behavior.
+
 ### 7) Chaos Mode
 
 ```bash
@@ -276,11 +278,11 @@ Directories:
 Files:
   /tmp/.aperture_science/smh
   /tmp/.aperture_science/turret
-  /tmp/.aperture_science/README.aperture
+  /tmp/.aperture_science/README.txt
 
 Cron:
-  */5 * * * * /tmp/.aperture_science/smh --maintain
-  */3 * * * * /tmp/.aperture_science/turret
+  */5 * * * * /tmp/.aperture_science/smh --maintain # APERTURE_PERSISTENCE
+  */3 * * * * /tmp/.aperture_science/turret # APERTURE_PERSISTENCE
 ```
 
 ### Windows
@@ -288,6 +290,9 @@ Cron:
 ```
 Directories:
   %TEMP%\ApertureScience\
+
+Files:
+  %TEMP%\ApertureScience\README.txt
 
 Scheduled Tasks:
   ApertureEnrichment

