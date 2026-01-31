@@ -46,6 +46,9 @@ python3 init_access/default_cred_spray.py --teams 1-12
 # Deploy persistence
 python3 orchestrator/persistence.py --teams-count 12
 
+# Init competition (runs the full bootstrap sequence)
+python3 orchestrator/glados.py --teams-count 12 --action init_competition
+
 # User management
 python3 orchestrator/user_management.py --teams-count 12 --action create_themed_users --targets all
 
