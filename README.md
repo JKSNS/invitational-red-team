@@ -113,7 +113,7 @@ The scripts will prompt for how many teams are playing and compute addresses acc
 
 | Hostname | Host ID | OS | Services |
 |----------|---------|----|----------|
-| schrodinger | 1 | OPNsense | SSH, HTTP |
+| schrodinger | 1 | OPNsense | HTTP |
 | curiosity | 140 | Win Server 2016 | SMB, WinRM, RDP |
 | morality | 10 | Win Server 2016 | SMB, WinRM, HTTP |
 | intelligence | 11 | Win Server 2019 | SMB, WinRM, RDP |
@@ -132,11 +132,17 @@ The scripts will prompt for how many teams are playing and compute addresses acc
 
 Targets can be overridden by setting `APERTURE_TARGETS_FILE` to a JSON file that matches the schema in `lib/operations.py`.
 
+Notes:
+* `schrodinger` is the OPNsense router and may not expose SSH; it is treated as HTTP-only by default.
+* `discouragement` (NixOS) is HTTP-only by default, so SSH access attempts are skipped.
+
 ## Operations Guide
 
 ### SSH Key Handling
 
 If a script needs SSH key authentication, it will prompt to create an SSH key if none exists. If a key already exists, it will use the existing key.
+
+The init workflow installs your local SSH public key into the `glados` account (when one is available). If you connect as `chell`, you'll still be prompted for the default password. Use `glados` with your key after init, or provide `APERTURE_SSH_PUBKEY` explicitly to guarantee key-based access.
 
 ### 1) Start C2 Server
 
@@ -214,7 +220,23 @@ python3 orchestrator/user_management.py --teams-count 12 --action create_glados_
 | `glados` | Red team admin account created by init. | Admin group + sudoers entry when available |
 | `companion`, `atlas`, `pbody` | Themed accounts created by init. | Admin group membership when available |
 
+The red team password for admin/fun users is `Password123!`. The default `chell` account remains `Th3cake1salie!`.
+
 If a local SSH public key is available (`~/.ssh/id_ed25519.pub`, `id_rsa.pub`, or `id_ecdsa.pub`), `init_competition` will install it into `glados`'s `authorized_keys`. You can also set `APERTURE_SSH_PUBKEY` explicitly to control the key used.
+
+#### Post-init access checks
+
+After `init_competition`, validate Linux access using the `glados` account:
+
+```bash
+# With a local key (recommended)
+ssh -i ~/.ssh/id_ed25519 glados@192.168.212.14
+
+# With password fallback
+ssh glados@192.168.212.14
+```
+
+If you still see a password prompt when expecting key-based auth, confirm the key path, the `glados` user, and that the key was loaded or `APERTURE_SSH_PUBKEY` was set before running init.
 
 ### 6) Website Defacement
 

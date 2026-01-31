@@ -14,16 +14,16 @@ from .common import TEAM_SUBNET_BASE, find_missing_binaries, get_red_team_ip
 
 DEFAULT_USER = "chell"
 DEFAULT_PASS = "Th3cake1salie!"
-REDTEAM_PASS = "password"
+REDTEAM_PASS = "Password123!"
 
 
 def _get_ssh_pubkey() -> str:
     return os.environ.get("APERTURE_SSH_PUBKEY", "").strip()
 
 THEMED_USERS = [
-    ("companion", "thecake"),
-    ("atlas", "p-body"),
-    ("pbody", "atlas123"),
+    ("companion", REDTEAM_PASS),
+    ("atlas", REDTEAM_PASS),
+    ("pbody", REDTEAM_PASS),
 ]
 
 
@@ -41,7 +41,7 @@ class Target:
         return self.wan_ip(team)
 
 DEFAULT_TARGETS = [
-    Target("schrodinger", 1, "linux", ["ssh", "http"]),
+    Target("schrodinger", 1, "linux", ["http"]),
     Target("curiosity", 140, "windows", ["smb", "winrm", "rdp"]),
     Target("morality", 10, "windows", ["smb", "winrm", "rdp", "http"]),
     Target("intelligence", 11, "windows", ["smb", "winrm", "rdp"]),
@@ -200,6 +200,8 @@ class RemoteExecutor:
         cmd_windows: str,
         parallel: bool = True,
         ssh_key: Optional[str] = None,
+        ssh_timeout: int = 30,
+        winrm_timeout: int = 30,
     ) -> Dict[str, List[Dict]]:
         if ssh_key is None:
             ssh_key = self.ssh_key
@@ -265,9 +267,9 @@ class RemoteExecutor:
         def execute_task(task):
             team, target, ip, cmd, method = task
             if method == "ssh":
-                success, output = self.ssh_exec(ip, cmd, ssh_key=ssh_key)
+                success, output = self.ssh_exec(ip, cmd, ssh_key=ssh_key, timeout=ssh_timeout)
             else:
-                success, output = self.winrm_exec(ip, cmd)
+                success, output = self.winrm_exec(ip, cmd, timeout=winrm_timeout)
             return {
                 "team": team,
                 "target": target.hostname,
@@ -543,8 +545,17 @@ detect_os_id() {
 install_ssh_server() {
     os_id="$(detect_os_id)"
     if [ "$os_id" = "nixos" ]; then
-        echo "NIXOS_SSH_INSTALL_SKIPPED"
-        return 0
+        if command -v nix-env >/dev/null 2>&1; then
+            nix-env -iA nixos.openssh >/dev/null 2>&1 || nix-env -iA openssh >/dev/null 2>&1 || true
+        else
+            echo "NIXOS_SSH_INSTALL_SKIPPED"
+            return 0
+        fi
+    fi
+    if [ -x /usr/local/sbin/opnsense-update ] || [ "$os_id" = "opnsense" ]; then
+        if command -v pkg >/dev/null 2>&1; then
+            pkg install -y openssh-portable >/dev/null 2>&1 || pkg install -y openssh >/dev/null 2>&1 || true
+        fi
     fi
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -y >/dev/null 2>&1 || true
@@ -608,7 +619,7 @@ New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP 
 New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 Write-Output "ACCESS_OPENED"
 '''
-        return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
+        return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd, ssh_timeout=5, winrm_timeout=5)
 
     def install_access_tasks(self, targets: List[str]) -> Dict:
         pubkey = _get_ssh_pubkey()
@@ -640,8 +651,17 @@ detect_os_id() {{
 install_ssh_server() {{
     os_id="$(detect_os_id)"
     if [ "$os_id" = "nixos" ]; then
-        echo "NIXOS_SSH_INSTALL_SKIPPED"
-        return 0
+        if command -v nix-env >/dev/null 2>&1; then
+            nix-env -iA nixos.openssh >/dev/null 2>&1 || nix-env -iA openssh >/dev/null 2>&1 || true
+        else
+            echo "NIXOS_SSH_INSTALL_SKIPPED"
+            return 0
+        fi
+    fi
+    if [ -x /usr/local/sbin/opnsense-update ] || [ "$os_id" = "opnsense" ]; then
+        if command -v pkg >/dev/null 2>&1; then
+            pkg install -y openssh-portable >/dev/null 2>&1 || pkg install -y openssh >/dev/null 2>&1 || true
+        fi
     fi
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -y >/dev/null 2>&1 || true
