@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import threading
+import shutil
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -150,6 +151,8 @@ class SSHSpray:
         """Attempt SSH login"""
         if not check_port(ip, 22):
             return False, "Port 22 closed"
+        if shutil.which("sshpass") is None:
+            return False, "sshpass not installed"
         
         cmd = [
             "sshpass", "-p", creds.password,
@@ -158,6 +161,10 @@ class SSHSpray:
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", f"ConnectTimeout={timeout}",
             "-o", "BatchMode=no",
+            "-o", "PreferredAuthentications=password",
+            "-o", "PubkeyAuthentication=no",
+            "-o", "KbdInteractiveAuthentication=no",
+            "-o", "NumberOfPasswordPrompts=1",
             f"{creds.username}@{ip}",
             "echo APERTURE_SUCCESS"
         ]
