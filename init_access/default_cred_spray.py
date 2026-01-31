@@ -29,7 +29,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from lib.common import resolve_team_numbers
+from lib.common import find_missing_binaries, get_log_dir, resolve_team_numbers
 
 
 # Configuration
@@ -81,8 +81,7 @@ DEFAULT_CREDS = [
 # Logging
 
 
-LOG_DIR = Path("/var/log/aperture")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR = get_log_dir("aperture")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -539,6 +538,11 @@ Examples:
         teams = resolve_team_numbers()
     else:
         teams = resolve_team_numbers(args.teams)
+
+    missing = find_missing_binaries(["sshpass", "crackmapexec", "smbclient", "mysql", "timeout"])
+    if missing:
+        print(f"[!] Missing local binaries: {', '.join(missing)}")
+        print("[!] Install these tools to enable all spray modules.")
     
     # Scan only mode
     if args.scan_only:
